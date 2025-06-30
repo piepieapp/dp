@@ -15,7 +15,8 @@ import {
   AlertCircle, CheckCircle, Target, FileText 
 } from 'lucide-react';
 import { AppContextType } from '../App';
-import { mockDesigners } from '../services/mockData';
+import { dataStorage } from '../services/dataStorage';
+import { Project, Designer, Task } from '../types';
 
 interface ProjectEditorProps {
   projectId?: string;
@@ -24,36 +25,135 @@ interface ProjectEditorProps {
   navigateTo: (nav: any) => void;
 }
 
+interface ProjectFormData {
+  id?: string;
+  name: string;
+  description: string;
+  jiraKey: string;
+  status: 'Active' | 'Completed' | 'On Hold';
+  startDate: string;
+  endDate?: string;
+  deadline: string;
+  priority: 'Low' | 'Medium' | 'High';
+  teamMembers: Array<{ designerId: string, role: string, allocation?: number }>;
+  tasks: Array<{ id: string, title: string, status: string, assigneeId?: string, description?: string }>;
+  progress?: number;
+  hoursSpent?: number;
+}
+
 export function ProjectEditor({ projectId, mode, context, navigateTo }: ProjectEditorProps) {
-  const [projectForm, setProjectForm] = useState({
+  const [projectForm, setProjectForm] = useState<ProjectFormData>({
     name: '',
     description: '',
     jiraKey: '',
-    status: 'Active' as 'Active' | 'Completed' | 'On Hold',
+    status: 'Active',
     startDate: '',
     endDate: '',
-    priority: 'Medium' as 'Low' | 'Medium' | 'High',
-    teamMembers: [] as Array<{designerId: string, role: string, allocation: number}>,
-    tasks: [] as Array<{id: string, title: string, status: string, assigneeId: string}>,
+    deadline: '',
+    priority: 'Medium',
+    teamMembers: [],
+    tasks: [],
+    progress: 0,
+    hoursSpent: 0,
   });
 
+  const [allDesigners, setAllDesigners] = useState<Designer[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    setIsLoading(true);
+    const designersData = dataStorage.getDesigners();
+    setAllDesigners(designersData || []);
+
+    if (mode === 'edit' && projectId) {
+      const projectsData = dataStorage.getProjects();
+      const projectToEdit = projectsData.find(p => p.id === projectId);
+      if (projectToEdit) {
+        setProjectForm({
+          id: projectToEdit.id,
+          name: projectToEdit.name,
+          description: projectToEdit.description || '',
+          jiraKey: projectToEdit.jiraKey,
+          status: projectToEdit.status,
+          startDate: projectToEdit.startDate,
+          endDate: projectToEdit.endDate || '',
+          deadline: projectToEdit.deadline,
+          priority: projectToEdit.priority || 'Medium',
+          teamMembers: projectToEdit.teamMembers || [],
+          tasks: (projectToEdit.tasks || []).map(t => ({
+            id: t.id,
+            title: t.title,
+            status: t.status,
+            assigneeId: t.assignee,
+            description: (t as any).description || ''
+          })),
+          progress: projectToEdit.progress || 0,
+          hoursSpent: projectToEdit.hoursSpent || 0,
+        });
+      } else {
+        context.addNotification({ title: 'Помилка', message: `Проект з ID ${projectId} не знайдено.`, type: 'error' });
+        navigateTo({ section: 'projects' });
+      }
+    } else if (mode === 'create') {
+      setProjectForm({ // Reset for create mode
+        name: '',
+        description: '',
+        jiraKey: '',
+        status: 'Active',
+        startDate: '',
+        endDate: '',
+        deadline: '',
+        priority: 'Medium',
+        teamMembers: [],
+        tasks: [],
+        progress: 0,
+        hoursSpent: 0,
+      });
+    }
+    setIsLoading(false);
+  }, [mode, projectId, context, navigateTo]);
 
   const handleSave = async () => {
     setIsLoading(true);
     
-    if (!projectForm.name || !projectForm.description || !projectForm.jiraKey) {
+    if (!projectForm.name || !projectForm.description || !projectForm.jiraKey || !projectForm.startDate || !projectForm.deadline) {
       context.addNotification({
         title: 'Помилка валідації',
-        message: 'Заповніть всі обов\'язкові поля',
+        message: 'Заповніть всі обов\'язкові поля: Назва, Опис, Jira Key, Дата початку, Дедлайн',
         type: 'error'
       });
       setIsLoading(false);
       return;
     }
 
+    const projectToSave: Project = {
+      id: mode === 'create' ? Date.now().toString() : projectId!,
+      name: projectForm.name,
+      description: projectForm.description,
+      jiraKey: projectForm.jiraKey,
+      status: projectForm.status,
+      startDate: projectForm.startDate,
+      endDate: projectForm.endDate || undefined,
+      deadline: projectForm.deadline,
+      priority: projectForm.priority,
+      teamMembers: projectForm.teamMembers,
+      tasks: projectForm.tasks.map(t => ({
+          id: t.id || Date.now().toString() + Math.random(),
+          title: t.title,
+          status: t.status,
+          assignee: t.assigneeId || '',
+          jiraKey: '', // Should be derived or set if tasks are global
+          priority: 'Medium',
+          estimatedHours: 0,
+          actualHours: 0,
+      })),
+      progress: projectForm.progress || 0,
+      hoursSpent: projectForm.hoursSpent || 0,
+    };
+
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      dataStorage.saveProject(projectToSave);
+      context.triggerDataRefresh(); // <--- Виклик triggerDataRefresh
       
       context.addNotification({
         title: mode === 'create' ? 'Проект створено' : 'Проект оновлено',
@@ -127,6 +227,16 @@ export function ProjectEditor({ projectId, mode, context, navigateTo }: ProjectE
                 value={projectForm.jiraKey}
                 onChange={(e) => setProjectForm(prev => ({ ...prev, jiraKey: e.target.value }))}
                 placeholder="PROJ-123"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="deadline">Дедлайн *</Label>
+              <Input
+                id="deadline"
+                type="date"
+                value={projectForm.deadline}
+                onChange={(e) => setProjectForm(prev => ({ ...prev, deadline: e.target.value }))}
               />
             </div>
 

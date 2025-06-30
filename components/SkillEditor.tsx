@@ -14,7 +14,8 @@ import {
   AlertCircle, CheckCircle, Award, BookOpen 
 } from 'lucide-react';
 import { AppContextType } from '../App';
-import { mockSkills, mockDesigners } from '../services/mockData';
+import { dataStorage } from '../services/dataStorage';
+import { Skill, Designer } from '../types'; // Removed mock imports
 import { Progress } from './ui/progress';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 
@@ -64,31 +65,37 @@ export function SkillEditor({ skillId, mode, context, navigateTo }: SkillEditorP
   const [showAddResource, setShowAddResource] = useState(false);
   const [showAddCriteria, setShowAddCriteria] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [designers, setDesigners] = useState<Designer[]>([]);
 
-  // Mock categories
+  // Mock categories - can be dynamic later if needed
   const categories = ['Design', 'Research', 'Tools', 'Development', 'Soft Skills', 'Leadership'];
 
   useEffect(() => {
+    const designersData = dataStorage.getDesigners();
+    setDesigners(designersData || []);
+
     if (mode === 'edit' && skillId) {
-      // Load existing skill data
-      const existingSkill = mockSkills.find(s => s.id === skillId);
+      const skillsData = dataStorage.getSkills();
+      const existingSkill = skillsData.find(s => s.id === skillId);
       if (existingSkill) {
         setSkillForm({
           name: existingSkill.name,
           category: existingSkill.category,
           description: existingSkill.description,
           maxLevel: existingSkill.maxLevel,
-          learningResources: [],
-          assessmentCriteria: []
+          learningResources: (existingSkill as any).learningResources || [],
+          assessmentCriteria: (existingSkill as any).assessmentCriteria || []
         });
+      } else {
+        context.addNotification({ title: 'Помилка', message: `Навичку з ID ${skillId} не знайдено.`, type: 'error' });
+        navigateTo({ section: 'skills' });
       }
     }
-  }, [mode, skillId]);
+  }, [mode, skillId, context, navigateTo]);
 
   const handleSave = async () => {
     setIsLoading(true);
     
-    // Validate form
     if (!skillForm.name || !skillForm.category || !skillForm.description) {
       context.addNotification({
         title: 'Помилка валідації',
@@ -99,9 +106,19 @@ export function SkillEditor({ skillId, mode, context, navigateTo }: SkillEditorP
       return;
     }
 
+    const skillToSave: Skill = {
+      id: mode === 'create' ? Date.now().toString() : skillId!,
+      name: skillForm.name,
+      category: skillForm.category,
+      description: skillForm.description,
+      maxLevel: skillForm.maxLevel,
+      // learningResources and assessmentCriteria are not part of the current Skill type
+      // and dataStorage methods. They would need type and service updates to be saved.
+    };
+
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      dataStorage.saveSkill(skillToSave);
+      context.triggerDataRefresh(); // <--- Виклик triggerDataRefresh
       
       context.addNotification({
         title: mode === 'create' ? 'Навичку створено' : 'Навичку оновлено',
@@ -109,11 +126,11 @@ export function SkillEditor({ skillId, mode, context, navigateTo }: SkillEditorP
         type: 'success'
       });
 
-      // Navigate back to skills matrix
       navigateTo({ section: 'skills' });
     } catch (error) {
+      console.error("Error saving skill:", error);
       context.addNotification({
-        title: 'Помилка',
+        title: 'Помилка збереження',
         message: 'Не вдалось зберегти навичку',
         type: 'error'
       });
@@ -160,19 +177,22 @@ export function SkillEditor({ skillId, mode, context, navigateTo }: SkillEditorP
     }));
   };
 
-  // Get skill statistics if editing
-  const skillStats = skillId ? (() => {
-    const allRatings = mockDesigners.flatMap(designer => 
-      designer.skills.filter(s => s.skillId === skillId)
+  const skillStats = (mode === 'edit' && skillId && designers.length > 0) ? (() => {
+    const allRatings = designers.flatMap(designer =>
+      (designer.skills || []).filter(s => s.skillId === skillId)
     );
     
     return {
       totalUsers: allRatings.length,
       avgLevel: allRatings.length > 0 ? 
-        Math.round(allRatings.reduce((sum, rating) => sum + rating.level, 0) / allRatings.length) : 0,
-      distribution: [1, 2, 3, 4, 5].map(level => {
-        const count = allRatings.filter(r => Math.round(r.level / 20) === level - 1).length;
-        return { level, count };
+        Math.round(allRatings.reduce((sum, rating) => sum + (rating.level || rating.currentLevel || 0), 0) / allRatings.length) : 0,
+      distribution: [1, 2, 3, 4, 5].map(levelTarget => { // Assuming maxLevel 5 for this distribution example
+        const count = allRatings.filter(r => {
+          const currentSkillLevel = r.level || r.currentLevel || 0;
+          // This distribution logic might need adjustment based on how levels (1-5) vs percentage (0-100) are handled
+          return Math.ceil(currentSkillLevel / (100 / skillForm.maxLevel)) === levelTarget;
+        }).length;
+        return { level: levelTarget, count };
       })
     };
   })() : null;

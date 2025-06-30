@@ -30,19 +30,24 @@ export function DesignersManager({ context, navigateTo }: DesignersManagerProps)
   const [departmentFilter, setDepartmentFilter] = useState<string>('all');
   const [levelFilter, setLevelFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Завантажуємо дизайнерів з localStorage або mock даних
   useEffect(() => {
+    setIsLoading(true);
     const storedDesigners = dataStorage.getDesigners();
-    if (storedDesigners.length > 0) {
-      setDesigners(storedDesigners);
-    } else {
-      setDesigners(mockDesigners);
-    }
-  }, []);
+    // Немає потреби в mockDesigners, оскільки App.tsx ініціалізує дані
+    setDesigners(storedDesigners || []);
+    setIsLoading(false);
+  }, [context.dataVersion]); // Додано context.dataVersion для оновлення
 
   const filteredDesigners = designers.filter(designer => {
-    const matchesSearch = designer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    const name = designer.name || '';
+    const position = designer.position || '';
+    const matchesSearch = name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         position.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesPosition = positionFilter === 'all' || position.includes(positionFilter);
+    const matchesDepartment = departmentFilter === 'all' || (designer.department || 'Design') === departmentFilter;
+    const matchesLevel = levelFilter === 'all' || (designer.level || 'Middle') === levelFilter;
                          designer.position.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesPosition = positionFilter === 'all' || designer.position.includes(positionFilter);
     const matchesDepartment = departmentFilter === 'all' || (designer.department || 'Design') === departmentFilter;
@@ -74,42 +79,41 @@ export function DesignersManager({ context, navigateTo }: DesignersManagerProps)
   const getAverageSkillLevel = (skills: any[]) => {
     if (!skills || skills.length === 0) return 0;
     const total = skills.reduce((sum, skill) => sum + (skill.level || skill.currentLevel || 0), 0);
-    return Math.round(total / skills.length);
+    return Math.round(total / (skills.length || 1)); // Avoid division by zero
   };
 
-  const getLowPerformers = () => {
-    return designers.filter(designer => {
-      const avgSkill = getAverageSkillLevel(designer.skills);
-      const efficiency = designer.efficiency || 0;
-      return avgSkill < 60 || efficiency < 70;
-    });
-  };
+  const lowPerformersCount = designers.filter(designer => {
+    const avgSkill = getAverageSkillLevel(designer.skills || []);
+    const efficiency = designer.efficiency || 0;
+    return avgSkill < 60 || efficiency < 70;
+  }).length;
 
-  const getUpcomingBirthdays = () => {
+  const upcomingBirthdaysCount = designers.filter(designer => {
+    if (!designer.birthDate) return false;
     const today = new Date();
     const nextWeek = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
-    
-    return designers.filter(designer => {
-      if (!designer.birthDate) return false;
-      const birth = new Date(designer.birthDate);
-      const thisYearBirthday = new Date(today.getFullYear(), birth.getMonth(), birth.getDate());
-      
-      return thisYearBirthday >= today && thisYearBirthday <= nextWeek;
-    });
-  };
+    const birth = new Date(designer.birthDate);
+    const thisYearBirthday = new Date(today.getFullYear(), birth.getMonth(), birth.getDate());
+    return thisYearBirthday >= today && thisYearBirthday <= nextWeek;
+  }).length;
 
   // Статистика команди
   const teamStats = {
     total: designers.length,
-    active: designers.filter(d => d.isActive !== false).length,
-    averageSkillLevel: Math.round(designers.reduce((sum, d) => sum + getAverageSkillLevel(d.skills), 0) / designers.length),
-    lowPerformers: getLowPerformers().length,
-    upcomingBirthdays: getUpcomingBirthdays().length
+    active: designers.filter(d => (d as any).isActive !== false && d.status !== 'Inactive').length, // Узгодження з DesignerForm isActive та Designer status
+    averageSkillLevel: designers.length > 0 ? Math.round(designers.reduce((sum, d) => sum + getAverageSkillLevel(d.skills || []), 0) / designers.length) : 0,
+    lowPerformers: lowPerformersCount,
+    upcomingBirthdays: upcomingBirthdaysCount
   };
 
-  const uniquePositions = ['all', ...Array.from(new Set(designers.map(d => d.position.split(' ')[0])))];
-  const uniqueDepartments = ['all', ...Array.from(new Set(designers.map(d => d.department || 'Design')))];
+  const uniquePositions = ['all', ...Array.from(new Set(designers.map(d => d.position?.split(' ')[0]).filter(Boolean) as string[]))];
+  const uniqueDepartments = ['all', ...Array.from(new Set(designers.map(d => d.department || 'Design').filter(Boolean)))];
   const uniqueLevels = ['all', 'Junior', 'Middle', 'Senior', 'Lead', 'Principal'];
+
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center h-full">Завантаження дизайнерів...</div>;
+  }
 
   return (
     <div className="space-y-6">
@@ -269,9 +273,9 @@ export function DesignersManager({ context, navigateTo }: DesignersManagerProps)
       {viewMode === 'grid' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {filteredDesigners.map(designer => {
-            const avgSkillLevel = getAverageSkillLevel(designer.skills);
-            const daysSinceJoining = calculateDaysSinceJoining(designer.startDate);
-            const age = calculateAge(designer.birthDate);
+            const avgSkillLevel = getAverageSkillLevel(designer.skills || []);
+            const daysSinceJoining = designer.joinDate ? calculateDaysSinceJoining(designer.joinDate) : null;
+            const age = designer.birthDate ? calculateAge(designer.birthDate) : null;
             
             return (
               <Card key={designer.id} className="hover:shadow-lg transition-shadow group">
@@ -279,7 +283,7 @@ export function DesignersManager({ context, navigateTo }: DesignersManagerProps)
                   <div className="flex items-center gap-3">
                     <Avatar className="w-12 h-12">
                       <AvatarImage src={designer.avatar} alt={designer.name} />
-                      <AvatarFallback>{designer.name.split(' ').map(n => n[0]).join('')}</AvatarFallback>
+                      <AvatarFallback>{designer.name?.split(' ').map(n => n[0]).join('')}</AvatarFallback>
                     </Avatar>
                     <div className="flex-1 min-w-0">
                       <h3 className="font-medium truncate">{designer.name}</h3>
@@ -305,15 +309,34 @@ export function DesignersManager({ context, navigateTo }: DesignersManagerProps)
                           Переглянути профіль
                         </DropdownMenuItem>
                         {context.currentUser.permissions.includes('manage_team') && (
-                          <DropdownMenuItem onClick={() => navigateTo({ 
-                            section: 'designers', 
-                            subsection: 'designer-editor', 
-                            id: designer.id,
-                            mode: 'edit' 
-                          })}>
-                            <Edit className="w-4 h-4 mr-2" />
-                            Редагувати
-                          </DropdownMenuItem>
+                          <>
+                            <DropdownMenuItem onClick={() => navigateTo({
+                              section: 'designers',
+                              subsection: 'designer-editor',
+                              id: designer.id,
+                              mode: 'edit'
+                            })}>
+                              <Edit className="w-4 h-4 mr-2" />
+                              Редагувати
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => {
+                                if (window.confirm(`Ви впевнені, що хочете видалити дизайнера ${designer.name}?`)) {
+                                  dataStorage.deleteDesigner(designer.id);
+                                  context.triggerDataRefresh();
+                                  context.addNotification({
+                                    title: 'Дизайнера видалено',
+                                    message: `Дизайнер ${designer.name} був успішно видалений.`,
+                                    type: 'success'
+                                  });
+                                }
+                              }}
+                              className="text-red-600 hover:text-red-700"
+                            >
+                              <Trash2 className="w-4 h-4 mr-2" />
+                              Видалити
+                            </DropdownMenuItem>
+                          </>
                         )}
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -330,13 +353,13 @@ export function DesignersManager({ context, navigateTo }: DesignersManagerProps)
                   </div>
                   
                   <div className="grid grid-cols-2 gap-4 text-sm">
-                    {age && (
+                    {age !== null && (
                       <div>
                         <span className="text-muted-foreground">Вік:</span>
                         <div className="font-medium">{age} років</div>
                       </div>
                     )}
-                    {daysSinceJoining && (
+                    {daysSinceJoining !== null && (
                       <div>
                         <span className="text-muted-foreground">В команді:</span>
                         <div className="font-medium">{daysSinceJoining} днів</div>
@@ -344,7 +367,7 @@ export function DesignersManager({ context, navigateTo }: DesignersManagerProps)
                     )}
                     <div>
                       <span className="text-muted-foreground">Ефективність:</span>
-                      <div className="font-medium">{designer.efficiency || 85}%</div>
+                      <div className="font-medium">{designer.efficiency || 0}%</div>
                     </div>
                     <div>
                       <span className="text-muted-foreground">Проектів:</span>
@@ -353,9 +376,9 @@ export function DesignersManager({ context, navigateTo }: DesignersManagerProps)
                   </div>
 
                   <div className="flex gap-2 flex-wrap">
-                    <Badge variant="outline">{designer.level || 'Middle'}</Badge>
-                    <Badge variant="secondary">{designer.department || 'Design'}</Badge>
-                    {(designer.isActive === false) && (
+                    <Badge variant="outline">{designer.level || 'N/A'}</Badge>
+                    <Badge variant="secondary">{designer.department || 'N/A'}</Badge>
+                    {(designer.status === 'Inactive') && ( // Узгодження з типом Designer
                       <Badge variant="destructive">Неактивний</Badge>
                     )}
                   </div>
@@ -417,7 +440,7 @@ export function DesignersManager({ context, navigateTo }: DesignersManagerProps)
                 </thead>
                 <tbody>
                   {filteredDesigners.map(designer => {
-                    const avgSkillLevel = getAverageSkillLevel(designer.skills);
+                    const avgSkillLevel = getAverageSkillLevel(designer.skills || []);
                     
                     return (
                       <tr key={designer.id} className="border-b hover:bg-muted/25 transition-colors">
@@ -425,7 +448,7 @@ export function DesignersManager({ context, navigateTo }: DesignersManagerProps)
                           <div className="flex items-center gap-3">
                             <Avatar className="w-10 h-10">
                               <AvatarImage src={designer.avatar} alt={designer.name} />
-                              <AvatarFallback>{designer.name.split(' ').map(n => n[0]).join('')}</AvatarFallback>
+                              <AvatarFallback>{designer.name?.split(' ').map(n => n[0]).join('')}</AvatarFallback>
                             </Avatar>
                             <div>
                               <div className="font-medium">{designer.name}</div>
@@ -445,7 +468,7 @@ export function DesignersManager({ context, navigateTo }: DesignersManagerProps)
                           </div>
                         </td>
                         <td className="p-4">
-                          <span className="text-sm">{designer.efficiency || 85}%</span>
+                          <span className="text-sm">{designer.efficiency || 0}%</span>
                         </td>
                         <td className="p-4">
                           <div className="flex gap-1">
@@ -472,6 +495,26 @@ export function DesignersManager({ context, navigateTo }: DesignersManagerProps)
                                 })}
                               >
                                 <Edit className="w-4 h-4" />
+                              </Button>
+                            )}
+                             {context.currentUser.permissions.includes('manage_team') && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="text-red-600 hover:text-red-700 hover:bg-red-100"
+                                onClick={() => {
+                                  if (window.confirm(`Ви впевнені, що хочете видалити дизайнера ${designer.name}?`)) {
+                                    dataStorage.deleteDesigner(designer.id);
+                                    context.triggerDataRefresh();
+                                    context.addNotification({
+                                      title: 'Дизайнера видалено',
+                                      message: `Дизайнер ${designer.name} був успішно видалений.`,
+                                      type: 'success'
+                                    });
+                                  }
+                                }}
+                              >
+                                <Trash2 className="w-4 h-4" />
                               </Button>
                             )}
                           </div>

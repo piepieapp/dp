@@ -15,6 +15,8 @@ import {
   Image, Mic, Download, Settings
 } from 'lucide-react';
 import { AppContextType } from '../App';
+import { dataStorage } from '../services/dataStorage';
+import { Lesson as GlobalLesson, LearningModule as GlobalLearningModule } from '../types';
 
 interface LessonEditorProps {
   lessonId?: string;
@@ -92,19 +94,61 @@ export function LessonEditor({ lessonId, moduleId, mode, context, navigateTo }: 
   const [wordCount, setWordCount] = useState(0);
 
   useEffect(() => {
-    if (mode === 'edit' && lessonId) {
-      // Load existing lesson data
-      // В реальному додатку тут буде API виклик
-      setLessonForm(prev => ({
-        ...prev,
-        title: 'Основи UX досліджень',
-        type: 'video',
-        duration: 25,
-        content: 'Детальний контент уроку...',
-        description: 'Цей урок охоплює основні принципи UX досліджень'
-      }));
+    if (mode === 'edit' && lessonId && moduleId) {
+      setIsLoading(true);
+      const modules = dataStorage.getLearningModules();
+      const module = modules.find(m => m.id === moduleId);
+      const lesson = module?.lessons?.find(l => l.id === lessonId);
+
+      if (lesson) {
+        setLessonForm({
+          title: lesson.title,
+          type: lesson.type as LessonForm['type'],
+          duration: parseInt(lesson.duration) || 15,
+          content: lesson.content,
+          description: (lesson as any).description || '',
+          videoUrl: (lesson as any).videoUrl || '',
+          attachments: (lesson as any).attachments || [],
+          settings: (lesson as any).settings || {
+            isPublished: false,
+            allowComments: true,
+            trackCompletion: true,
+            retakeAllowed: true,
+            certificateEligible: false
+          },
+          order: (lesson as any).order || 1,
+          prerequisites: (lesson as any).prerequisites || [],
+          learningObjectives: (lesson as any).learningObjectives || [],
+          resources: (lesson as any).resources || []
+        });
+      } else {
+        context.addNotification({ title: 'Помилка', message: `Урок з ID ${lessonId} в модулі ${moduleId} не знайдено.`, type: 'error' });
+        if (moduleId) navigateTo({ section: 'learning', subsection: 'module-editor', id: moduleId, mode: 'edit' });
+        else navigateTo({ section: 'learning' });
+      }
+      setIsLoading(false);
+    } else if (mode === 'create') {
+      setLessonForm({ // Reset form for create mode
+        title: '',
+        type: 'article',
+        duration: 15,
+        content: '',
+        description: '',
+        attachments: [],
+        settings: {
+          isPublished: false,
+          allowComments: true,
+          trackCompletion: true,
+          retakeAllowed: true,
+          certificateEligible: false
+        },
+        order: 1,
+        prerequisites: [],
+        learningObjectives: [],
+        resources: []
+      });
     }
-  }, [mode, lessonId]);
+  }, [mode, lessonId, moduleId, context, navigateTo]);
 
   // Автозбереження в draft
   useEffect(() => {
@@ -139,11 +183,33 @@ export function LessonEditor({ lessonId, moduleId, mode, context, navigateTo }: 
       return;
     }
 
+    const lessonToSave: GlobalLesson = {
+      id: mode === 'create' ? Date.now().toString() : lessonId!,
+      title: lessonForm.title,
+      type: lessonForm.type as GlobalLesson['type'], // Ensure type compatibility
+      duration: lessonForm.duration.toString() + ' хв', // Save as string
+      content: lessonForm.content,
+      completed: lessonForm.settings.trackCompletion ? false : true, // Example logic
+      // Optional fields from LessonForm to be added to GlobalLesson if they exist in its definition
+      // description: lessonForm.description,
+      // videoUrl: lessonForm.videoUrl,
+      // attachments: lessonForm.attachments,
+      // settings: lessonForm.settings,
+      // order: lessonForm.order,
+      // prerequisites: lessonForm.prerequisites,
+      // learningObjectives: lessonForm.learningObjectives,
+      // resources: lessonForm.resources,
+    };
+
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      if (!moduleId) {
+        context.addNotification({ title: 'Помилка', message: "ID модуля відсутній. Неможливо зберегти урок.", type: 'error' });
+        setIsLoading(false);
+        return;
+      }
+      dataStorage.saveLesson(lessonToSave, moduleId);
+      context.triggerDataRefresh(); // <--- Виклик triggerDataRefresh
       
-      // Очищаємо draft
       localStorage.removeItem(`lesson-draft-${lessonId || 'new'}`);
       
       context.addNotification({
@@ -152,7 +218,6 @@ export function LessonEditor({ lessonId, moduleId, mode, context, navigateTo }: 
         type: 'success'
       });
 
-      // Повертаємось до редагування модуля
       if (moduleId) {
         navigateTo({ 
           section: 'learning', 
@@ -161,11 +226,12 @@ export function LessonEditor({ lessonId, moduleId, mode, context, navigateTo }: 
           mode: 'edit' 
         });
       } else {
-        navigateTo({ section: 'learning' });
+        navigateTo({ section: 'learning' }); // Fallback, should ideally always have moduleId
       }
     } catch (error) {
+      console.error("Error saving lesson:", error);
       context.addNotification({
-        title: 'Помилка',
+        title: 'Помилка збереження',
         message: 'Не вдалось зберегти урок',
         type: 'error'
       });

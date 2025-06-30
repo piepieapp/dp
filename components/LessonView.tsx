@@ -12,9 +12,10 @@ import {
   Clock, Target, Award, Download, Share
 } from 'lucide-react';
 import { AppContextType } from '../App';
+import { Lesson as GlobalLesson } from '../types'; // Import GlobalLesson
 
 interface LessonViewProps {
-  lesson: any;
+  lesson: GlobalLesson | undefined | null; // Make lesson prop typed and potentially undefined/null
   context: AppContextType;
   navigateTo: (nav: any) => void;
 }
@@ -25,67 +26,36 @@ export function LessonView({ lesson, context, navigateTo }: LessonViewProps) {
   const [notes, setNotes] = useState('');
   const [checklist, setChecklist] = useState<Record<string, boolean>>({});
 
-  // Mock lesson data
-  const lessonData = {
-    id: lesson.id,
-    title: lesson.title,
-    description: lesson.content,
-    type: lesson.type,
-    duration: lesson.duration,
-    transcript: `
-      Ласкаво просимо до уроку з UX дослідження. 
-      
-      У цьому уроку ми розглянемо:
-      - Основні принципи UX дослідження
-      - Методи збору даних
-      - Аналіз результатів
-      - Практичні приклади
-      
-      Давайте почнемо з основ...
-    `,
-    checklist: [
-      { id: '1', text: 'Переглянути відео повністю', completed: false },
-      { id: '2', text: 'Прочитати додаткові матеріали', completed: false },
-      { id: '3', text: 'Зробити нотатки ключових моментів', completed: false },
-      { id: '4', text: 'Виконати практичне завдання', completed: false }
-    ],
-    resources: [
-      { id: '1', title: 'Слайди презентації', type: 'pdf', url: '#' },
-      { id: '2', title: 'Шаблон для дослідження', type: 'template', url: '#' },
-      { id: '3', title: 'Приклади кейсів', type: 'link', url: '#' }
-    ],
-    quiz: {
-      questions: [
-        {
-          id: '1',
-          question: 'Що є основною метою UX дослідження?',
-          options: [
-            'Створення красивого дизайну',
-            'Розуміння потреб користувачів',
-            'Збільшення продажів',
-            'Покращення технічних характеристик'
-          ],
-          correct: 1
-        },
-        {
-          id: '2',
-          question: 'Який метод найкращий для збору якісних даних?',
-          options: [
-            'Опитування',
-            'A/B тестування',
-            'Інтерв\'ю',
-            'Веб-аналітика'
-          ],
-          correct: 2
-        }
-      ]
-    }
+  if (!lesson) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <AlertCircle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+        <h3>Дані уроку не знайдено або урок не вибрано.</h3>
+      </div>
+    );
+  }
+
+  // Assuming lesson object (GlobalLesson) might have these additional fields from LessonForm,
+  // or they need to be added to GlobalLesson type if they are to be persisted.
+  const lessonData = lesson as GlobalLesson & {
+    description?: string; // Assuming description might be part of content or a separate field
+    transcript?: string;
+    checklist?: Array<{ id: string; text: string; completed: boolean }>;
+    resources?: Array<{ id: string; title: string; type: string; url: string }>;
+    quiz?: { questions: Array<any> }; // Define more specific type for quiz questions if needed
+    videoUrl?: string;
   };
 
-  const totalDuration = 900; // 15 minutes in seconds
-  const progress = (currentTime / totalDuration) * 100;
+  const parseDurationToSeconds = (durationString: string | undefined): number => {
+    if (!durationString) return 0;
+    const minutes = parseInt(durationString);
+    return isNaN(minutes) ? 0 : minutes * 60;
+  };
 
-  const formatTime = (seconds: number) => {
+  const totalDuration = parseDurationToSeconds(lessonData.duration);
+  const progress = totalDuration > 0 ? (currentTime / totalDuration) * 100 : 0;
+
+  const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
@@ -96,7 +66,7 @@ export function LessonView({ lesson, context, navigateTo }: LessonViewProps) {
   };
 
   const completedTasks = Object.values(checklist).filter(Boolean).length;
-  const totalTasks = lessonData.checklist.length;
+  const totalTasks = (lessonData.checklist || []).length;
 
   return (
     <div className="space-y-6">
@@ -105,18 +75,20 @@ export function LessonView({ lesson, context, navigateTo }: LessonViewProps) {
         <div className="space-y-2">
           <div className="flex items-center gap-3">
             <h1 className="text-3xl font-bold">{lessonData.title}</h1>
-            <Badge variant="secondary">{lessonData.type}</Badge>
+            <Badge variant="secondary">{lessonData.type as string}</Badge>
           </div>
-          <p className="text-lg text-muted-foreground">{lessonData.description}</p>
+          <p className="text-lg text-muted-foreground">{lessonData.description || lessonData.content}</p>
           <div className="flex items-center gap-4 text-sm text-muted-foreground">
             <div className="flex items-center gap-1">
               <Clock className="w-4 h-4" />
               {lessonData.duration}
             </div>
-            <div className="flex items-center gap-1">
-              <Target className="w-4 h-4" />
-              {completedTasks}/{totalTasks} завдань завершено
-            </div>
+            {(lessonData.checklist && lessonData.checklist.length > 0) && (
+              <div className="flex items-center gap-1">
+                <Target className="w-4 h-4" />
+                {completedTasks}/{totalTasks} завдань завершено
+              </div>
+            )}
           </div>
         </div>
         
@@ -141,11 +113,15 @@ export function LessonView({ lesson, context, navigateTo }: LessonViewProps) {
               {lessonData.type === 'video' ? (
                 <div className="relative">
                   <div className="aspect-video bg-black rounded-t-lg flex items-center justify-center">
-                    <div className="text-white text-center">
-                      <Play className="w-16 h-16 mx-auto mb-4 opacity-80" />
-                      <p>Відео контент</p>
-                      <p className="text-sm opacity-60">Тривалість: {lessonData.duration}</p>
-                    </div>
+                    {lessonData.videoUrl ? (
+                      <video src={lessonData.videoUrl} controls className="w-full h-full" />
+                    ) : (
+                      <div className="text-white text-center">
+                        <Play className="w-16 h-16 mx-auto mb-4 opacity-80" />
+                        <p>Відео контент</p>
+                        <p className="text-sm opacity-60">Тривалість: {lessonData.duration}</p>
+                      </div>
+                    )}
                   </div>
                   
                   {/* Video Controls */}
@@ -179,7 +155,7 @@ export function LessonView({ lesson, context, navigateTo }: LessonViewProps) {
               ) : (
                 <div className="p-6">
                   <div className="prose max-w-none">
-                    <p>{lessonData.transcript}</p>
+                    <div className="whitespace-pre-line">{lessonData.content}</div>
                   </div>
                 </div>
               )}
@@ -187,83 +163,89 @@ export function LessonView({ lesson, context, navigateTo }: LessonViewProps) {
           </Card>
 
           {/* Lesson Content Tabs */}
-          <Tabs defaultValue="transcript" className="space-y-4">
+          <Tabs defaultValue="content" className="space-y-4">
             <TabsList>
-              <TabsTrigger value="transcript">Транскрипт</TabsTrigger>
-              <TabsTrigger value="resources">Ресурси</TabsTrigger>
-              <TabsTrigger value="quiz">Тест</TabsTrigger>
+              <TabsTrigger value="content">Контент</TabsTrigger>
+              {(lessonData.resources && lessonData.resources.length > 0) && <TabsTrigger value="resources">Ресурси</TabsTrigger>}
+              {(lessonData.quiz && lessonData.quiz.questions.length > 0) && <TabsTrigger value="quiz">Тест</TabsTrigger>}
               <TabsTrigger value="notes">Нотатки</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="transcript">
+            <TabsContent value="content">
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Текст уроку</CardTitle>
+                  <CardTitle className="text-base">Текст уроку / Транскрипт</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="prose max-w-none">
-                    <div className="whitespace-pre-line">{lessonData.transcript}</div>
+                    <div className="whitespace-pre-line">{lessonData.transcript || lessonData.content}</div>
                   </div>
                 </CardContent>
               </Card>
             </TabsContent>
 
-            <TabsContent value="resources">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {lessonData.resources.map(resource => (
-                  <Card key={resource.id} className="hover:shadow-md transition-shadow cursor-pointer">
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <BookOpen className="w-5 h-5 text-blue-500" />
-                          <div>
-                            <h4 className="font-medium">{resource.title}</h4>
-                            <Badge variant="outline" className="text-xs mt-1">
-                              {resource.type.toUpperCase()}
-                            </Badge>
+            {(lessonData.resources && lessonData.resources.length > 0) && (
+              <TabsContent value="resources">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {(lessonData.resources || []).map(resource => (
+                    <Card key={resource.id} className="hover:shadow-md transition-shadow cursor-pointer">
+                      <CardContent className="p-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <BookOpen className="w-5 h-5 text-blue-500" />
+                            <div>
+                              <h4 className="font-medium">{resource.title}</h4>
+                              <Badge variant="outline" className="text-xs mt-1">
+                                {resource.type.toUpperCase()}
+                              </Badge>
+                            </div>
                           </div>
+                          <Button size="sm" variant="ghost" asChild>
+                            <a href={resource.url} target="_blank" rel="noopener noreferrer">
+                              <Download className="w-4 h-4" />
+                            </a>
+                          </Button>
                         </div>
-                        <Button size="sm" variant="ghost">
-                          <Download className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </TabsContent>
-
-            <TabsContent value="quiz">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Перевірка знань</CardTitle>
-                  <CardDescription>Відповідайте на питання щоб перевірити розуміння матеріалу</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  {lessonData.quiz.questions.map((question, index) => (
-                    <div key={question.id} className="space-y-3">
-                      <h4 className="font-medium">
-                        {index + 1}. {question.question}
-                      </h4>
-                      <div className="space-y-2">
-                        {question.options.map((option, optionIndex) => (
-                          <div key={optionIndex} className="flex items-center space-x-2">
-                            <Checkbox id={`q${question.id}-${optionIndex}`} />
-                            <label 
-                              htmlFor={`q${question.id}-${optionIndex}`}
-                              className="text-sm cursor-pointer"
-                            >
-                              {option}
-                            </label>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+                      </CardContent>
+                    </Card>
                   ))}
-                  <Button className="w-full">Перевірити відповіді</Button>
-                </CardContent>
-              </Card>
-            </TabsContent>
+                </div>
+              </TabsContent>
+            )}
+
+            {(lessonData.quiz && lessonData.quiz.questions.length > 0) && (
+              <TabsContent value="quiz">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Перевірка знань</CardTitle>
+                    <CardDescription>Відповідайте на питання щоб перевірити розуміння матеріалу</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    {(lessonData.quiz?.questions || []).map((question, index) => (
+                      <div key={question.id} className="space-y-3">
+                        <h4 className="font-medium">
+                          {index + 1}. {question.question}
+                        </h4>
+                        <div className="space-y-2">
+                          {(question.options || []).map((option: string, optionIndex: number) => (
+                            <div key={optionIndex} className="flex items-center space-x-2">
+                              <Checkbox id={`q${question.id}-${optionIndex}`} />
+                              <label
+                                htmlFor={`q${question.id}-${optionIndex}`}
+                                className="text-sm cursor-pointer"
+                              >
+                                {option}
+                              </label>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                    <Button className="w-full">Перевірити відповіді</Button>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            )}
 
             <TabsContent value="notes">
               <Card>
@@ -313,7 +295,7 @@ export function LessonView({ lesson, context, navigateTo }: LessonViewProps) {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {lessonData.checklist.map(item => (
+                {(lessonData.checklist || []).map(item => (
                   <div key={item.id} className="flex items-center space-x-2">
                     <Checkbox
                       id={item.id}
@@ -333,6 +315,7 @@ export function LessonView({ lesson, context, navigateTo }: LessonViewProps) {
                     )}
                   </div>
                 ))}
+                 {(lessonData.checklist || []).length === 0 && <p className="text-sm text-muted-foreground">Для цього уроку немає списку завдань.</p>}
               </div>
             </CardContent>
           </Card>

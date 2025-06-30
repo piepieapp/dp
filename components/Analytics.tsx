@@ -4,9 +4,17 @@ import { Progress } from './ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Button } from './ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { useState, useEffect } from 'react'; // Added
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Badge } from './ui/badge';
+import { Progress } from './ui/progress';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { Button } from './ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { TrendingUp, TrendingDown, Users, Target, Clock, Award } from 'lucide-react';
 import { AppContextType } from '../App';
-import { mockDesigners } from '../services/mockData';
+import { dataStorage } from '../services/dataStorage'; // Added
+import { Designer } from '../types'; // Added
 import { Chart, ChartContainer, ChartTooltip, ChartTooltipContent } from './ui/chart';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from 'recharts';
 
@@ -14,6 +22,7 @@ interface AnalyticsProps {
   context: AppContextType;
 }
 
+// Mock data for charts, real data would require historical data storage
 const performanceData = [
   { month: 'Січ', productivity: 85, quality: 88, efficiency: 82 },
   { month: 'Лют', productivity: 87, quality: 90, efficiency: 85 },
@@ -24,10 +33,24 @@ const performanceData = [
 ];
 
 export function Analytics({ context }: AnalyticsProps) {
-  const totalDesigners = mockDesigners.length;
-  const avgProductivity = Math.round(mockDesigners.reduce((sum, d) => sum + d.kpis.productivity, 0) / totalDesigners);
-  const avgQuality = Math.round(mockDesigners.reduce((sum, d) => sum + d.kpis.quality, 0) / totalDesigners);
-  const avgEfficiency = Math.round(mockDesigners.reduce((sum, d) => sum + d.efficiency, 0) / totalDesigners);
+  const [designers, setDesigners] = useState<Designer[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    setIsLoading(true);
+    const designersData = dataStorage.getDesigners();
+    setDesigners(designersData || []);
+    setIsLoading(false);
+  }, [context.dataVersion]); // Re-fetch if global data version changes
+
+  const totalDesigners = designers.length;
+  const avgProductivity = totalDesigners > 0 ? Math.round(designers.reduce((sum, d) => sum + (d.kpis?.productivity || 0), 0) / totalDesigners) : 0;
+  const avgQuality = totalDesigners > 0 ? Math.round(designers.reduce((sum, d) => sum + (d.kpis?.quality || 0), 0) / totalDesigners) : 0;
+  const avgEfficiency = totalDesigners > 0 ? Math.round(designers.reduce((sum, d) => sum + (d.efficiency || 0), 0) / totalDesigners) : 0;
+
+  if (isLoading) {
+    return <div className="p-6 space-y-6 text-center">Завантаження аналітики...</div>;
+  }
 
   return (
     <div className="p-6 space-y-6">
@@ -145,19 +168,20 @@ export function Analytics({ context }: AnalyticsProps) {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {['Junior', 'Middle', 'Senior', 'Lead'].map(level => {
-                    const count = mockDesigners.filter(d => d.level === level).length;
-                    const percentage = (count / totalDesigners) * 100;
+                  {['Junior', 'Middle', 'Senior', 'Lead'].map(levelName => {
+                    const count = designers.filter(d => d.level === levelName).length;
+                    const percentage = totalDesigners > 0 ? (count / totalDesigners) * 100 : 0;
                     return (
-                      <div key={level} className="space-y-2">
+                      <div key={levelName} className="space-y-2">
                         <div className="flex justify-between">
-                          <span className="text-sm">{level}</span>
+                          <span className="text-sm">{levelName}</span>
                           <span className="text-sm">{count} ({Math.round(percentage)}%)</span>
                         </div>
                         <Progress value={percentage} />
                       </div>
                     );
                   })}
+                   {totalDesigners === 0 && <p className="text-sm text-muted-foreground text-center">Немає даних для відображення.</p>}
                 </div>
               </CardContent>
             </Card>
@@ -172,7 +196,7 @@ export function Analytics({ context }: AnalyticsProps) {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {mockDesigners.map(designer => (
+                {designers.map(designer => (
                   <div key={designer.id} className="p-4 border rounded-lg cursor-pointer hover:bg-secondary/50 transition-colors"
                        onClick={() => context.setRightPanel({ 
                          isOpen: true, 
@@ -182,11 +206,10 @@ export function Analytics({ context }: AnalyticsProps) {
                        })}>
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-3">
-                        <img 
-                          src={designer.avatar} 
-                          alt={designer.name}
-                          className="w-10 h-10 rounded-full object-cover"
-                        />
+                        <Avatar className="w-10 h-10">
+                           <AvatarImage src={designer.avatar} alt={designer.name} />
+                           <AvatarFallback>{designer.name?.split(' ').map(n => n[0]).join('')}</AvatarFallback>
+                        </Avatar>
                         <div>
                           <h4 className="font-medium">{designer.name}</h4>
                           <p className="text-sm text-muted-foreground">{designer.position}</p>
@@ -199,19 +222,19 @@ export function Analytics({ context }: AnalyticsProps) {
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                       <div>
                         <div className="text-sm text-muted-foreground">Продуктивність</div>
-                        <div className="font-medium">{designer.kpis.productivity}%</div>
+                        <div className="font-medium">{designer.kpis?.productivity || 0}%</div>
                       </div>
                       <div>
                         <div className="text-sm text-muted-foreground">Якість</div>
-                        <div className="font-medium">{designer.kpis.quality}%</div>
+                        <div className="font-medium">{designer.kpis?.quality || 0}%</div>
                       </div>
                       <div>
                         <div className="text-sm text-muted-foreground">Ефективність</div>
-                        <div className="font-medium">{designer.efficiency}%</div>
+                        <div className="font-medium">{designer.efficiency || 0}%</div>
                       </div>
                       <div>
                         <div className="text-sm text-muted-foreground">Загальний KPI</div>
-                        <div className="font-medium">{designer.kpis.overallScore}%</div>
+                        <div className="font-medium">{designer.kpis?.overallScore || 0}%</div>
                       </div>
                     </div>
                   </div>

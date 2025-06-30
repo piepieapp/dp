@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Progress } from './ui/progress';
@@ -16,8 +16,8 @@ import {
   GraduationCap, PlusCircle, AlertCircle
 } from 'lucide-react';
 import { AppContextType } from '../App';
-import { mockDesigners } from '../services/mockData';
-import { Designer } from '../types';
+import { dataStorage } from '../services/dataStorage';
+import { Designer, LearningModule as GlobalLearningModule, Skill, LearningModule as AssignedLearningModule } from '../types';
 
 interface DesignerProfileProps {
   designerId: string;
@@ -27,10 +27,41 @@ interface DesignerProfileProps {
 }
 
 export function DesignerProfile({ designerId, context, navigateTo }: DesignerProfileProps) {
-  const designer = mockDesigners.find(d => d.id === designerId);
-  const [isEditing, setIsEditing] = useState(false);
+  const [designer, setDesigner] = useState<Designer | null>(null);
+  const [allLearningModules, setAllLearningModules] = useState<GlobalLearningModule[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [showAssignModule, setShowAssignModule] = useState(false);
   const [selectedModule, setSelectedModule] = useState('');
+  const [assignDeadline, setAssignDeadline] = useState('');
+
+  useEffect(() => {
+    setIsLoading(true);
+    const storedDesigners = dataStorage.getDesigners();
+    const currentDesigner = storedDesigners.find(d => d.id === designerId);
+
+    if (currentDesigner) {
+      const skillsFromStorage = dataStorage.getSkills();
+      const enrichedSkills = (currentDesigner.skills || []).map(ds => {
+        const skillInfo = skillsFromStorage.find(s => s.id === ds.skillId);
+        return {
+          ...ds,
+          name: skillInfo?.name || ds.skillName || 'Unknown Skill',
+          category: skillInfo?.category || ds.category || 'Unknown',
+        };
+      });
+      setDesigner({ ...currentDesigner, skills: enrichedSkills });
+    } else {
+      setDesigner(null);
+    }
+
+    const modules = dataStorage.getLearningModules();
+    setAllLearningModules(modules || []);
+    setIsLoading(false);
+  }, [designerId]);
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center h-96">Завантаження профілю...</div>;
+  }
 
   if (!designer) {
     return (
@@ -38,13 +69,13 @@ export function DesignerProfile({ designerId, context, navigateTo }: DesignerPro
         <div className="text-center">
           <AlertCircle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
           <h3>Дизайнера не знайдено</h3>
-          <p className="text-muted-foreground">Перевірте правильність ID дизайнера</p>
+          <p className="text-muted-foreground">Перевірте правильність ID дизайнера або він був видалений.</p>
         </div>
       </div>
     );
   }
 
-  // Корисні розрахунки
+  // Корисні розрахунки (використовують `designer` зі стану)
   const calculateAge = (birthDate: string): number => {
     const birth = new Date(birthDate);
     const today = new Date();
@@ -93,12 +124,14 @@ export function DesignerProfile({ designerId, context, navigateTo }: DesignerPro
   const workDays = designer.joinDate ? calculateWorkDays(designer.joinDate) : null;
   const nextBirthday = designer.birthDate ? getNextBirthday(designer.birthDate) : null;
 
-  const averageRating = designer.peerReviews.length > 0 
-    ? designer.peerReviews.reduce((sum, review) => sum + review.rating, 0) / designer.peerReviews.length 
+  const designerPeerReviews = designer.peerReviews || [];
+  const averageRating = designerPeerReviews.length > 0
+    ? designerPeerReviews.reduce((sum, review) => sum + review.rating, 0) / designerPeerReviews.length
     : 0;
 
-  const completedModules = designer.learningModules.filter(m => m.status === 'Completed').length;
-  const totalModules = designer.learningModules.length;
+  const designerLearningModules = designer.learningModules || [];
+  const completedModules = designerLearningModules.filter(m => m.status === 'Completed').length;
+  const totalModules = designerLearningModules.length;
   const learningProgress = totalModules > 0 ? (completedModules / totalModules) * 100 : 0;
 
   return (
@@ -147,7 +180,10 @@ export function DesignerProfile({ designerId, context, navigateTo }: DesignerPro
         
         <div className="flex gap-2">
           {context.currentUser.permissions.includes('manage_team') && (
-            <Button onClick={() => setIsEditing(true)} variant="outline">
+            <Button
+              onClick={() => navigateTo({ section: 'designers', subsection: 'designer-editor', id: designerId, mode: 'edit' })}
+              variant="outline"
+            >
               <Edit className="w-4 h-4 mr-2" />
               Редагувати
             </Button>
@@ -289,21 +325,21 @@ export function DesignerProfile({ designerId, context, navigateTo }: DesignerPro
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {designer.skills.slice(0, 8).map(skill => (
-                    <div key={skill.id} className="flex items-center justify-between">
-                      <span className="text-sm">{skill.name}</span>
+                  {(designer.skills || []).slice(0, 8).map(skill => (
+                    <div key={skill.id || skill.skillId} className="flex items-center justify-between">
+                      <span className="text-sm">{skill.skillName}</span>
                       <div className="flex items-center gap-2">
-                        <Progress value={skill.level} className="w-20" />
+                        <Progress value={skill.level || skill.currentLevel || 0} className="w-20" />
                         <span className="text-xs text-muted-foreground w-8">
-                          {skill.level}%
+                          {skill.level || skill.currentLevel || 0}%
                         </span>
                       </div>
                     </div>
                   ))}
-                  {designer.skills.length > 8 && (
+                  {(designer.skills || []).length > 8 && (
                     <Button variant="ghost" size="sm" className="w-full mt-2"
                             onClick={() => navigateTo({ section: 'skills', subsection: 'designer-skills', id: designerId })}>
-                      Показати всі навички ({designer.skills.length})
+                      Показати всі навички ({(designer.skills || []).length})
                     </Button>
                   )}
                 </div>
@@ -399,7 +435,7 @@ export function DesignerProfile({ designerId, context, navigateTo }: DesignerPro
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {designer.learningModules.map(module => (
+                  {(designer.learningModules || []).map(module => (
                     <div key={module.id} className="p-3 border rounded-lg hover:bg-secondary/50 cursor-pointer transition-colors"
                          onClick={() => navigateTo({ 
                            section: 'learning', 
@@ -438,7 +474,7 @@ export function DesignerProfile({ designerId, context, navigateTo }: DesignerPro
                 </div>
                 <div className="text-center p-4 bg-secondary/30 rounded-lg">
                   <div className="text-2xl font-bold text-blue-600">
-                    {designer.learningModules.filter(m => m.status === 'In Progress').length}
+                    {(designer.learningModules || []).filter(m => m.status === 'In Progress').length}
                   </div>
                   <div className="text-sm text-muted-foreground">В процесі</div>
                 </div>
@@ -453,7 +489,7 @@ export function DesignerProfile({ designerId, context, navigateTo }: DesignerPro
 
         <TabsContent value="projects" className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {designer.projects.map(project => (
+            {(designer.projects || []).map(project => (
               <Card key={project.id} className="hover:shadow-md transition-shadow cursor-pointer">
                 <CardHeader className="pb-3">
                   <div className="flex justify-between items-start">
@@ -494,7 +530,7 @@ export function DesignerProfile({ designerId, context, navigateTo }: DesignerPro
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {designer.peerReviews.map(review => (
+                  {(designer.peerReviews || []).map(review => (
                     <div key={review.id} className="p-3 border rounded-lg">
                       <div className="flex justify-between items-start mb-2">
                         <div className="flex items-center gap-2">
@@ -535,7 +571,7 @@ export function DesignerProfile({ designerId, context, navigateTo }: DesignerPro
                     <div className="text-sm text-muted-foreground">Середній рейтинг</div>
                   </div>
                   <div className="text-center p-4 bg-secondary/30 rounded-lg">
-                    <div className="text-2xl font-bold">{designer.peerReviews.length}</div>
+                    <div className="text-2xl font-bold">{(designer.peerReviews || []).length}</div>
                     <div className="text-sm text-muted-foreground">Всього відгуків</div>
                   </div>
                 </div>
@@ -559,31 +595,64 @@ export function DesignerProfile({ designerId, context, navigateTo }: DesignerPro
                   <SelectValue placeholder="Оберіть модуль" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="ux-research">Advanced UX Research</SelectItem>
-                  <SelectItem value="design-systems">Design Systems Mastery</SelectItem>
-                  <SelectItem value="prototyping">Interactive Prototyping</SelectItem>
-                  <SelectItem value="accessibility">Accessibility in Design</SelectItem>
+                  {allLearningModules.map(module => (
+                    <SelectItem key={module.id} value={module.id}>
+                      {module.title} ({module.category})
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
               <Label>Дедлайн</Label>
-              <Input type="date" />
+              <Input type="date" value={assignDeadline} onChange={(e) => setAssignDeadline(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label>Коментар</Label>
+              <Label>Коментар (необов'язково)</Label>
               <Textarea placeholder="Додайте коментар або інструкції..." />
             </div>
             <div className="flex gap-2 pt-4">
               <Button onClick={() => {
-                // Логіка призначення модуля
-                context.addNotification({
-                  title: 'Модуль призначено',
-                  message: `Модуль успішно призначено для ${designer.name}`,
-                  type: 'success'
-                });
-                setShowAssignModule(false);
-                setSelectedModule('');
+                if (!selectedModule || !assignDeadline) {
+                  context.addNotification({
+                    title: 'Помилка',
+                    message: 'Оберіть модуль та вкажіть дедлайн',
+                    type: 'error',
+                  });
+                  return;
+                }
+                const moduleToAssign = allLearningModules.find(m => m.id === selectedModule);
+                if (designer && moduleToAssign) {
+                  const newAssignedModule: AssignedLearningModule = {
+                    id: moduleToAssign.id,
+                    title: moduleToAssign.title,
+                    description: moduleToAssign.description,
+                    category: moduleToAssign.category,
+                    difficulty: moduleToAssign.difficulty,
+                    estimatedTime: moduleToAssign.estimatedTime,
+                    status: 'Not Started',
+                    progress: 0,
+                    assignedDate: new Date().toISOString(),
+                    deadline: assignDeadline,
+                    tests: moduleToAssign.tests || [],
+                  };
+
+                  const updatedDesigner = {
+                    ...designer,
+                    learningModules: [...(designer.learningModules || []), newAssignedModule],
+                  };
+                  dataStorage.saveDesigner(updatedDesigner);
+                  setDesigner(updatedDesigner);
+
+                  context.addNotification({
+                    title: 'Модуль призначено',
+                    message: `Модуль "${moduleToAssign.title}" успішно призначено для ${designer.name}`,
+                    type: 'success',
+                  });
+                  setShowAssignModule(false);
+                  setSelectedModule('');
+                  setAssignDeadline('');
+                }
               }}>
                 Призначити
               </Button>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -8,8 +8,8 @@ import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Plus, Search, Users, Target, TrendingUp, Edit, Eye } from 'lucide-react';
 import { AppContextType } from '../App';
-import { Skill, Designer } from '../types';
-import { mockDesigners, mockSkills } from '../services/mockData';
+import { dataStorage } from '../services/dataStorage';
+import { Skill, Designer, SkillRating } from '../types';
 
 interface SkillsMatrixProps {
   context: AppContextType;
@@ -18,37 +18,65 @@ interface SkillsMatrixProps {
 }
 
 export function SkillsMatrix({ context, navigateTo }: SkillsMatrixProps) {
-  const [skills] = useState<Skill[]>(mockSkills);
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [designers, setDesigners] = useState<Designer[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
 
+  useEffect(() => {
+    setIsLoading(true);
+    const skillsData = dataStorage.getSkills();
+    const designersData = dataStorage.getDesigners();
+
+    setSkills(skillsData || []);
+    setDesigners(designersData || []);
+    setIsLoading(false);
+  }, [context.dataVersion]); // Додано context.dataVersion
+
   const filteredSkills = skills.filter(skill => {
-    const matchesSearch = skill.name.toLowerCase().includes(searchTerm.toLowerCase());
+    const name = skill.name || '';
+    const matchesSearch = name.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = categoryFilter === 'all' || skill.category === categoryFilter;
     return matchesSearch && matchesCategory;
   });
 
   const getSkillStats = (skill: Skill) => {
-    const allRatings = mockDesigners.flatMap(designer => 
-      designer.skills.filter(s => s.skillId === skill.id)
+    const allRatings = designers.flatMap(designer =>
+      (designer.skills || []).filter(s => s.skillId === skill.id)
     );
     
     const avgLevel = allRatings.length > 0 ? 
-      Math.round(allRatings.reduce((sum, rating) => sum + rating.level, 0) / allRatings.length) : 0;
+      Math.round(allRatings.reduce((sum, rating) => sum + (rating.level || rating.currentLevel || 0), 0) / allRatings.length) : 0;
     
     const designersWithSkill = allRatings.length;
-    const skillGap = mockDesigners.length - designersWithSkill;
+    const skillGap = designers.length - designersWithSkill;
     
     return { avgLevel, designersWithSkill, skillGap };
   };
 
   const categories = ['all', ...Array.from(new Set(skills.map(s => s.category)))];
+
   const overallStats = {
     totalSkills: skills.length,
-    avgLevel: skills.length > 0 ? Math.round(skills.reduce((sum, skill) => sum + getSkillStats(skill).avgLevel, 0) / skills.length) : 0,
-    coverage: Math.round((skills.reduce((sum, skill) => sum + getSkillStats(skill).designersWithSkill, 0) / (skills.length * mockDesigners.length)) * 100),
+    avgLevel: skills.length > 0
+      ? Math.round(skills.reduce((sum, skill) => {
+          const stats = getSkillStats(skill);
+          return sum + stats.avgLevel;
+        }, 0) / (skills.length || 1))
+      : 0,
+    coverage: skills.length > 0 && designers.length > 0
+      ? Math.round(
+          (skills.reduce((sum, skill) => sum + getSkillStats(skill).designersWithSkill, 0) /
+          (skills.length * designers.length)) * 100
+        )
+      : 0,
     skillGaps: skills.reduce((sum, skill) => sum + getSkillStats(skill).skillGap, 0)
   };
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center h-full">Завантаження матриці навичок...</div>;
+  }
 
   return (
     <div className="space-y-6">
@@ -214,6 +242,27 @@ export function SkillsMatrix({ context, navigateTo }: SkillsMatrixProps) {
                       <Edit className="w-4 h-4" />
                     </Button>
                   )}
+                   {context.currentUser.permissions.includes('edit_skills') && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-red-600 hover:text-red-700 hover:bg-red-100"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (window.confirm(`Ви впевнені, що хочете видалити навичку "${skill.name}"? Це також видалить її у всіх дизайнерів.`)) {
+                          dataStorage.deleteSkill(skill.id);
+                          context.triggerDataRefresh();
+                          context.addNotification({
+                            title: 'Навичку видалено',
+                            message: `Навичка "${skill.name}" була успішно видалена.`,
+                            type: 'success'
+                          });
+                        }
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -263,7 +312,7 @@ export function SkillsMatrix({ context, navigateTo }: SkillsMatrixProps) {
                 </tr>
               </thead>
               <tbody>
-                {mockDesigners.map(designer => (
+                {designers.map(designer => (
                   <tr key={designer.id} className="border-b hover:bg-secondary/50 cursor-pointer"
                       onClick={() => navigateTo({ 
                         section: 'designers', 
@@ -283,23 +332,23 @@ export function SkillsMatrix({ context, navigateTo }: SkillsMatrixProps) {
                       </div>
                     </td>
                     {filteredSkills.map(skill => {
-                      const skillRating = designer.skills.find(s => s.skillId === skill.id);
+                      const skillRating = (designer.skills || []).find(s => s.skillId === skill.id);
                       return (
                         <td key={skill.id} className="text-center p-2">
                           {skillRating ? (
                             <div className="space-y-1">
                               <div className="text-sm font-medium">
-                                {skillRating.level}%
+                                {skillRating.level || skillRating.currentLevel || 0}%
                               </div>
                               <div className="w-full bg-secondary rounded-full h-1">
                                 <div 
                                   className="bg-primary h-1 rounded-full" 
-                                  style={{ width: `${skillRating.level}%` }}
+                                  style={{ width: `${skillRating.level || skillRating.currentLevel || 0}%` }}
                                 />
                               </div>
-                              {skillRating.targetLevel > skillRating.currentLevel && (
+                              {(skillRating.targetLevel || 0) > (skillRating.level || skillRating.currentLevel || 0) && (
                                 <div className="text-xs text-muted-foreground">
-                                  → {skillRating.targetLevel * 20}%
+                                  → {skillRating.targetLevel}%
                                 </div>
                               )}
                             </div>

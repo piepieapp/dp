@@ -14,7 +14,8 @@ import {
   DragHandleDots2, GripVertical
 } from 'lucide-react';
 import { AppContextType } from '../App';
-import { mockLearningModules } from '../services/mockData';
+import { dataStorage } from '../services/dataStorage';
+import { LearningModule as GlobalLearningModule, Lesson as GlobalLesson, Test as GlobalTest, Question as GlobalQuestion } from '../types';
 
 interface ModuleEditorProps {
   moduleId?: string;
@@ -84,72 +85,63 @@ export function ModuleEditor({ moduleId, mode, context, navigateTo }: ModuleEdit
   const [showAddLesson, setShowAddLesson] = useState(false);
   const [showAddTest, setShowAddTest] = useState(false);
   const [showAddResource, setShowAddResource] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false); // Буде true при завантаженні даних
 
-  // Mock categories
   const categories = ['Design', 'Research', 'Tools', 'Leadership', 'Development', 'Innovation'];
 
   useEffect(() => {
     if (mode === 'edit' && moduleId) {
-      // Load existing module data
-      const existingModule = mockLearningModules.find(m => m.id === moduleId);
+      setIsLoading(true);
+      const modules = dataStorage.getLearningModules();
+      const existingModule = modules.find(m => m.id === moduleId);
+
       if (existingModule) {
+        const formLessons = (existingModule.lessons || []).map((lesson: GlobalLesson, index: number) => ({
+          id: lesson.id,
+          title: lesson.title,
+          type: lesson.type as 'video' | 'article' | 'interactive',
+          duration: lesson.duration.toString(), // Ensure duration is string for form
+          content: lesson.content,
+          order: (lesson as any).order || index + 1,
+          isCompleted: lesson.completed
+        }));
+
+        const formTests = (existingModule.tests || []).map((test: GlobalTest) => ({
+          id: test.id,
+          title: test.title,
+          description: (test as any).description || '',
+          questions: (test.questions || []).map((q: GlobalQuestion) => ({
+            id: q.id,
+            question: q.question,
+            type: q.type as 'multiple-choice' | 'text' | 'rating',
+            options: q.options || [],
+            correctAnswer: q.correctAnswer || undefined
+          })),
+          passingScore: test.passingScore,
+          timeLimit: (test as any).timeLimit || 30
+        }));
+
         setModuleForm({
           title: existingModule.title,
-          description: existingModule.description,
+          description: existingModule.description || '',
           category: existingModule.category,
           difficulty: existingModule.difficulty,
           estimatedTime: existingModule.estimatedTime,
-          lessons: [
-            {
-              id: '1',
-              title: 'Введення в UX дослідження',
-              type: 'video',
-              duration: '15 хв',
-              content: 'Основи UX дослідження та його роль в дизайн процесі',
-              order: 1
-            },
-            {
-              id: '2', 
-              title: 'Методи збору даних',
-              type: 'article',
-              duration: '25 хв',
-              content: 'Інтерв\'ю, анкетування, спостереження',
-              order: 2
-            }
-          ],
-          tests: existingModule.tests.map(test => ({
-            id: test.id,
-            title: test.title,
-            description: '',
-            questions: test.questions.map(q => ({
-              id: q.id,
-              question: q.question,
-              type: q.type,
-              options: q.options,
-              correctAnswer: q.correctAnswer
-            })),
-            passingScore: test.passingScore,
-            timeLimit: 60
-          })),
-          resources: [
-            {
-              id: '1',
-              title: 'UX Research Toolkit',
-              type: 'pdf',
-              url: '#',
-              description: 'Збірка шаблонів для проведення досліджень'
-            }
-          ]
+          lessons: formLessons,
+          tests: formTests,
+          resources: (existingModule as any).resources || []
         });
+      } else {
+        context.addNotification({ title: 'Помилка', message: `Модуль з ID ${moduleId} не знайдено.`, type: 'error' });
+        navigateTo({ section: 'learning' });
       }
+      setIsLoading(false);
     }
-  }, [mode, moduleId]);
+  }, [mode, moduleId, context, navigateTo, context.dataVersion]); // Додано context.dataVersion
 
   const handleSave = async () => {
     setIsLoading(true);
     
-    // Validate form
     if (!moduleForm.title || !moduleForm.description || !moduleForm.category) {
       context.addNotification({
         title: 'Помилка валідації',
@@ -160,9 +152,51 @@ export function ModuleEditor({ moduleId, mode, context, navigateTo }: ModuleEdit
       return;
     }
 
+    const lessonsToSave: GlobalLesson[] = moduleForm.lessons.map(lesson => ({
+      id: lesson.id || Date.now().toString() + Math.random(), // Ensure new lessons get ID
+      title: lesson.title,
+      type: lesson.type,
+      duration: lesson.duration.toString(),
+      content: lesson.content,
+      completed: lesson.isCompleted || false,
+      // order: lesson.order, // Якщо потрібно зберігати
+    }));
+
+    const testsToSave: GlobalTest[] = moduleForm.tests.map(test => ({
+      id: test.id || Date.now().toString() + Math.random(), // Ensure new tests get ID
+      title: test.title,
+      // description: test.description, // Якщо потрібно зберігати
+      questions: test.questions.map(q => ({
+          id: q.id || Date.now().toString() + Math.random(),
+          question: q.question,
+          type: q.type as 'multiple-choice' | 'text' | 'rating',
+          options: q.options,
+          correctAnswer: q.correctAnswer as string | undefined
+      })),
+      passingScore: test.passingScore,
+      attempts: [],
+      // timeLimit: test.timeLimit, // Якщо потрібно зберігати
+    }));
+
+    const moduleToSave: GlobalLearningModule = {
+      id: mode === 'create' ? Date.now().toString() : moduleId!,
+      title: moduleForm.title,
+      description: moduleForm.description,
+      category: moduleForm.category,
+      difficulty: moduleForm.difficulty,
+      estimatedTime: moduleForm.estimatedTime,
+      lessons: lessonsToSave,
+      tests: testsToSave,
+      // resources: moduleForm.resources, // To be implemented if Skill type is updated
+      status: 'Not Started',
+      progress: 0,
+      // assignedDate is for assigned modules, not general module definition
+      assignedDate: mode === 'create' ? new Date().toISOString() : (moduleForm as any).assignedDate || new Date().toISOString(),
+    };
+
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      dataStorage.saveLearningModule(moduleToSave);
+      context.triggerDataRefresh(); // <--- Виклик triggerDataRefresh
       
       context.addNotification({
         title: mode === 'create' ? 'Модуль створено' : 'Модуль оновлено',
@@ -170,11 +204,11 @@ export function ModuleEditor({ moduleId, mode, context, navigateTo }: ModuleEdit
         type: 'success'
       });
 
-      // Navigate back to modules list
       navigateTo({ section: 'learning' });
     } catch (error) {
+      console.error("Error saving module:", error);
       context.addNotification({
-        title: 'Помилка',
+        title: 'Помилка збереження',
         message: 'Не вдалось зберегти модуль',
         type: 'error'
       });
@@ -184,17 +218,35 @@ export function ModuleEditor({ moduleId, mode, context, navigateTo }: ModuleEdit
   };
 
   const removeLesson = (lessonId: string) => {
-    setModuleForm(prev => ({
-      ...prev,
-      lessons: prev.lessons.filter(l => l.id !== lessonId)
-    }));
+    if (!moduleId) {
+      context.addNotification({ title: 'Помилка', message: 'ID модуля не визначено для видалення уроку.', type: 'error' });
+      return;
+    }
+    if (window.confirm('Ви впевнені, що хочете видалити цей урок?')) {
+      dataStorage.deleteLesson(lessonId, moduleId);
+      setModuleForm(prev => ({
+        ...prev,
+        lessons: prev.lessons.filter(l => l.id !== lessonId)
+      }));
+      context.triggerDataRefresh(); // Оновити дані, оскільки зміни відбулись в dataStorage
+      context.addNotification({ title: 'Урок видалено', message: 'Урок успішно видалено.', type: 'success' });
+    }
   };
 
   const removeTest = (testId: string) => {
-    setModuleForm(prev => ({
-      ...prev,
-      tests: prev.tests.filter(t => t.id !== testId)
-    }));
+    if (!moduleId) {
+      context.addNotification({ title: 'Помилка', message: 'ID модуля не визначено для видалення тесту.', type: 'error' });
+      return;
+    }
+    if (window.confirm('Ви впевнені, що хочете видалити цей тест?')) {
+      dataStorage.deleteTest(testId, moduleId);
+      setModuleForm(prev => ({
+        ...prev,
+        tests: prev.tests.filter(t => t.id !== testId)
+      }));
+      context.triggerDataRefresh(); // Оновити дані
+      context.addNotification({ title: 'Тест видалено', message: 'Тест успішно видалено.', type: 'success' });
+    }
   };
 
   const removeResource = (resourceId: string) => {

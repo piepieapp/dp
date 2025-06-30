@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Progress } from './ui/progress';
@@ -5,40 +6,79 @@ import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { Button } from './ui/button';
 import { Users, Target, BookOpen, FolderOpen, TrendingUp, TrendingDown, Calendar, Clock } from 'lucide-react';
 import { AppContextType } from '../App';
-import { mockDesigners } from '../services/mockData';
+import { dataStorage, AppData } from '../services/dataStorage';
+import { Designer, Project, LearningModule } from '../types';
 
 interface DashboardProps {
   context: AppContextType;
 }
 
 export function Dashboard({ context }: DashboardProps) {
-  const totalDesigners = mockDesigners.length;
-  const avgProductivity = Math.round(mockDesigners.reduce((sum, d) => sum + d.kpis.productivity, 0) / totalDesigners);
-  const avgEfficiency = Math.round(mockDesigners.reduce((sum, d) => sum + d.efficiency, 0) / totalDesigners);
-  
-  const activeProjects = mockDesigners.flatMap(d => d.projects).filter(p => p.status === 'Active').length;
-  const completedProjects = mockDesigners.flatMap(d => d.projects).filter(p => p.status === 'Completed').length;
-  
-  const learningInProgress = mockDesigners.flatMap(d => d.learningModules).filter(m => m.status === 'In Progress').length;
-  const learningCompleted = mockDesigners.flatMap(d => d.learningModules).filter(m => m.status === 'Completed').length;
+  const [appData, setAppData] = useState<AppData | null>(null);
 
-  const topPerformers = mockDesigners
-    .sort((a, b) => b.kpis.overallScore - a.kpis.overallScore)
+  useEffect(() => {
+    const data = dataStorage.getAllData();
+    setAppData(data);
+  }, []);
+
+  if (!appData) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div>Завантаження даних дашборду...</div>
+      </div>
+    );
+  }
+
+  const designers = appData.designers || [];
+  const totalDesigners = designers.length;
+
+  const avgProductivity = totalDesigners > 0
+    ? Math.round(designers.reduce((sum, d) => sum + (d.kpis?.productivity || 0), 0) / totalDesigners)
+    : 0;
+
+  const avgEfficiency = totalDesigners > 0
+    ? Math.round(designers.reduce((sum, d) => sum + (d.efficiency || 0), 0) / totalDesigners)
+    : 0;
+  
+  const allProjects = designers.flatMap(d => d.projects || []) as Project[];
+  const activeProjects = allProjects.filter(p => p.status === 'Active').length;
+  // TODO: Implement "this month" logic if completion date is available
+  const completedProjects = allProjects.filter(p => p.status === 'Completed').length;
+  
+  const allLearningModulesAssigned = designers.flatMap(d => d.learningModules || []) as LearningModule[];
+  const learningInProgress = allLearningModulesAssigned.filter(m => m.status === 'In Progress').length;
+  // TODO: Implement "this month" logic if completion date is available for assigned modules
+  const learningCompleted = allLearningModulesAssigned.filter(m => m.status === 'Completed').length;
+
+  const topPerformers = [...designers]
+    .sort((a, b) => (b.kpis?.overallScore || 0) - (a.kpis?.overallScore || 0))
     .slice(0, 5);
 
-  const recentlyCompleted = mockDesigners
+  const recentlyCompletedLearning = designers
     .flatMap(designer => 
-      designer.learningModules
-        .filter(m => m.status === 'Completed')
-        .map(m => ({ ...m, designerName: designer.name, designerAvatar: designer.avatar }))
+      (designer.learningModules || []).filter(m => m.status === 'Completed' && m.completedDate)
+        .map(m => ({
+          ...m,
+          designerName: designer.name,
+          designerAvatar: designer.avatar,
+          // completedDate is assumed to be part of LearningModule type when assigned
+        }))
     )
+    .sort((a, b) => new Date(b.completedDate || 0).getTime() - new Date(a.completedDate || 0).getTime())
     .slice(0, 5);
 
-  const upcomingDeadlines = [
-    { project: 'Mobile App Redesign', deadline: '2024-12-30', designer: 'Марія Петренко' },
-    { project: 'Landing Page Update', deadline: '2025-01-05', designer: 'Анна Сидоренко' },
-    { project: 'Design System v2', deadline: '2025-01-10', designer: 'Дмитро Коваленко' }
-  ];
+  const upcomingDeadlines = allProjects
+    .filter(p => p.status === 'Active' && p.deadline)
+    .map(p => {
+      const designerInfo = designers.find(d => d.projects?.some(dp => dp.id === p.id));
+      return {
+        project: p.name,
+        deadline: p.deadline,
+        designer: designerInfo?.name || 'N/A',
+      };
+    })
+    .sort((a, b) => new Date(a.deadline!).getTime() - new Date(b.deadline!).getTime())
+    .slice(0, 3);
 
   return (
     <div className="h-full bg-background">
@@ -173,12 +213,12 @@ export function Dashboard({ context }: DashboardProps) {
                            mode: 'view' 
                          })}>
                       <Avatar className="w-8 h-8">
-                        <AvatarImage src={module.designerAvatar} alt={module.designerName} />
-                        <AvatarFallback>{module.designerName.split(' ').map(n => n[0]).join('')}</AvatarFallback>
+                        <AvatarImage src={item.designerAvatar as string | undefined} alt={item.designerName} />
+                        <AvatarFallback>{item.designerName?.split(' ').map(n => n[0]).join('')}</AvatarFallback>
                       </Avatar>
                       <div className="flex-1">
-                        <div className="font-medium text-sm">{module.title}</div>
-                        <div className="text-xs text-muted-foreground">{module.designerName}</div>
+                        <div className="font-medium text-sm">{item.title}</div>
+                        <div className="text-xs text-muted-foreground">{item.designerName}</div>
                       </div>
                       <Badge variant="default" className="text-xs">
                         100%
@@ -226,13 +266,13 @@ export function Dashboard({ context }: DashboardProps) {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {['Junior', 'Middle', 'Senior', 'Lead'].map(level => {
-                    const count = mockDesigners.filter(d => d.level === level).length;
-                    const percentage = (count / totalDesigners) * 100;
+                  {['Junior', 'Middle', 'Senior', 'Lead'].map(levelName => {
+                    const count = designers.filter(d => d.level === levelName).length;
+                    const percentage = totalDesigners > 0 ? (count / totalDesigners) * 100 : 0;
                     return (
-                      <div key={level} className="space-y-2">
+                      <div key={levelName} className="space-y-2">
                         <div className="flex justify-between">
-                          <span className="text-sm">{level}</span>
+                          <span className="text-sm">{levelName}</span>
                           <span className="text-sm">{count} ({Math.round(percentage)}%)</span>
                         </div>
                         <Progress value={percentage} />
