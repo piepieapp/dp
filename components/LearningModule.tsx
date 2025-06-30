@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -9,8 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Plus, Search, BookOpen, Users, Clock, CheckCircle, Play, AlertCircle, Edit, Eye } from 'lucide-react';
 import { AppContextType } from '../App';
-import { LearningModule } from '../types';
-import { mockDesigners, mockLearningModules } from '../services/mockData';
+import { dataStorage } from '../services/dataStorage';
+import { LearningModule, Designer } from '../types';
 
 interface LearningModuleManagerProps {
   context: AppContextType;
@@ -19,22 +19,36 @@ interface LearningModuleManagerProps {
 }
 
 export function LearningModuleManager({ context, navigateTo }: LearningModuleManagerProps) {
-  const [modules] = useState<LearningModule[]>(mockLearningModules);
+  const [modules, setModules] = useState<LearningModule[]>([]);
+  const [designers, setDesigners] = useState<Designer[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [difficultyFilter, setDifficultyFilter] = useState<string>('all');
 
+  useEffect(() => {
+    setIsLoading(true);
+    const modulesData = dataStorage.getLearningModules();
+    const designersData = dataStorage.getDesigners();
+
+    setModules(modulesData || []);
+    setDesigners(designersData || []);
+    setIsLoading(false);
+  }, [context.dataVersion]); // Додано context.dataVersion
+
   const filteredModules = modules.filter(module => {
-    const matchesSearch = module.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         module.description.toLowerCase().includes(searchTerm.toLowerCase());
+    const title = module.title || '';
+    const description = module.description || '';
+    const matchesSearch = title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         description.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = categoryFilter === 'all' || module.category === categoryFilter;
     const matchesDifficulty = difficultyFilter === 'all' || module.difficulty === difficultyFilter;
     return matchesSearch && matchesCategory && matchesDifficulty;
   });
 
   const getModuleStats = (module: LearningModule) => {
-    const allAssignments = mockDesigners.flatMap(designer => 
-      designer.learningModules.filter(m => m.id === module.id)
+    const allAssignments = designers.flatMap(designer =>
+      (designer.learningModules || []).filter(m => m.id === module.id)
     );
     
     return {
@@ -42,17 +56,22 @@ export function LearningModuleManager({ context, navigateTo }: LearningModuleMan
       completed: allAssignments.filter(m => m.status === 'Completed').length,
       inProgress: allAssignments.filter(m => m.status === 'In Progress').length,
       avgProgress: allAssignments.length > 0 ? 
-        Math.round(allAssignments.reduce((sum, m) => sum + m.progress, 0) / allAssignments.length) : 0
+        Math.round(allAssignments.reduce((sum, m) => sum + (m.progress || 0), 0) / allAssignments.length) : 0
     };
   };
 
-  const categories = ['all', ...Array.from(new Set(modules.map(m => m.category)))];
+  const categories = ['all', ...Array.from(new Set(modules.map(m => m.category)))].filter(Boolean);
   const difficulties = ['all', 'Beginner', 'Intermediate', 'Advanced'];
 
   const totalModules = modules.length;
-  const totalAssignments = mockDesigners.flatMap(d => d.learningModules).length;
-  const completedAssignments = mockDesigners.flatMap(d => d.learningModules).filter(m => m.status === 'Completed').length;
-  const inProgressAssignments = mockDesigners.flatMap(d => d.learningModules).filter(m => m.status === 'In Progress').length;
+  const assignedModulesOverall = designers.flatMap(d => d.learningModules || []);
+  const totalAssignments = assignedModulesOverall.length;
+  const completedAssignments = assignedModulesOverall.filter(m => m.status === 'Completed').length;
+  const inProgressAssignments = assignedModulesOverall.filter(m => m.status === 'In Progress').length;
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center h-full">Завантаження модулів навчання...</div>;
+  }
 
   return (
     <div className="space-y-6">
@@ -266,6 +285,27 @@ export function LearningModuleManager({ context, navigateTo }: LearningModuleMan
                           <Edit className="w-4 h-4" />
                         </Button>
                       )}
+                  {context.currentUser.permissions.includes('create_modules') && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-red-600 hover:text-red-700 hover:bg-red-100"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (window.confirm(`Ви впевнені, що хочете видалити модуль "${module.title}"? Це також видалить його з призначень у дизайнерів та всі пов'язані уроки і тести.`)) {
+                          dataStorage.deleteLearningModule(module.id);
+                          context.triggerDataRefresh();
+                          context.addNotification({
+                            title: 'Модуль видалено',
+                            message: `Модуль "${module.title}" успішно видалено.`,
+                            type: 'success'
+                          });
+                        }
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  )}
                     </div>
                   </CardContent>
                 </Card>
@@ -303,8 +343,8 @@ export function LearningModuleManager({ context, navigateTo }: LearningModuleMan
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {mockDesigners.map(designer => {
-                  const activeModules = designer.learningModules.filter(m => m.status !== 'Completed');
+                {designers.map(designer => {
+                  const activeModules = (designer.learningModules || []).filter(m => m.status !== 'Completed');
                   if (activeModules.length === 0) return null;
                   
                   return (
@@ -333,11 +373,11 @@ export function LearningModuleManager({ context, navigateTo }: LearningModuleMan
                           <div key={module.id} className="flex items-center justify-between text-sm">
                             <span>{module.title}</span>
                             <div className="flex items-center gap-2">
-                              <span>{module.progress}%</span>
+                              <span>{module.progress || 0}%</span>
                               <div className="w-16 h-1 bg-secondary rounded-full">
                                 <div 
                                   className="h-1 bg-primary rounded-full" 
-                                  style={{ width: `${module.progress}%` }}
+                                  style={{ width: `${module.progress || 0}%` }}
                                 />
                               </div>
                               <Badge variant={

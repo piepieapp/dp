@@ -21,7 +21,8 @@ import {
 } from 'lucide-react';
 import { AppContextType } from '../App';
 import { dataStorage } from '../services/dataStorage';
-import { mockDesigners, mockSkills } from '../services/mockData';
+import { mockDesigners } from '../services/mockData'; // mockSkills буде видалено
+import { Skill as GlobalSkill } from '../types';
 
 interface DesignerEditorProps {
   designerId?: string;
@@ -155,15 +156,20 @@ export function DesignerEditor({ designerId, mode, context, navigateTo }: Design
   const [photoURL, setPhotoURL] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessingImage, setIsProcessingImage] = useState(false);
+  const [globalSkills, setGlobalSkills] = useState<GlobalSkill[]>([]);
+
+  useEffect(() => {
+    const skillsFromStorage = dataStorage.getSkills();
+    setGlobalSkills(skillsFromStorage || []);
+  }, []);
 
   useEffect(() => {
     if (mode === 'edit' && designerId) {
-      // Завантажуємо дані дизайнера
       const designers = dataStorage.getDesigners();
       let designer = designers.find(d => d.id === designerId);
       
-      // Якщо не знайдено в localStorage, беремо з mock
       if (!designer) {
+        // Fallback to mockDesigners if not found in dataStorage (should ideally not happen in a real scenario)
         designer = mockDesigners.find(d => d.id === designerId);
       }
       
@@ -181,14 +187,17 @@ export function DesignerEditor({ designerId, mode, context, navigateTo }: Design
           level: designer.level || 'Middle',
           salary: designer.salary || 0,
           location: designer.location || '',
-          skills: designer.skills.map(skill => ({
-            skillId: skill.skillId,
-            skillName: mockSkills.find(s => s.id === skill.skillId)?.name || '',
-            currentLevel: skill.level,
-            targetLevel: skill.targetLevel || skill.level,
-            lastUpdated: skill.lastUpdated || new Date().toISOString(),
-            notes: skill.notes || ''
-          })),
+          skills: (designer.skills || []).map(skill => {
+            const globalSkill = globalSkills.find(s => s.id === skill.skillId);
+            return {
+              skillId: skill.skillId,
+              skillName: globalSkill?.name || skill.skillName || 'Unknown Skill',
+              currentLevel: skill.level || skill.currentLevel || 0,
+              targetLevel: skill.targetLevel || skill.level || skill.currentLevel || 0,
+              lastUpdated: skill.lastUpdated || new Date().toISOString(),
+              notes: skill.notes || ''
+            };
+          }),
           careerGoals: designer.careerGoals || [],
           developmentAreas: designer.developmentAreas || [],
           achievements: designer.achievements || [],
@@ -492,14 +501,13 @@ export function DesignerEditor({ designerId, mode, context, navigateTo }: Design
     }
   };
 
-  const addSkill = (skillId: string, level: number) => {
-    const skill = mockSkills.find(s => s.id === skillId);
-    if (skill && !designerForm.skills.find(s => s.skillId === skillId)) {
+  const addSkill = (skillId: string, level: number, skillName: string) => {
+    if (skillName && !designerForm.skills.find(s => s.skillId === skillId)) {
       const newSkill: SkillRating = {
         skillId,
-        skillName: skill.name,
+        skillName: skillName,
         currentLevel: level,
-        targetLevel: level,
+        targetLevel: level, // Default target to current level
         lastUpdated: new Date().toISOString()
       };
       setDesignerForm(prev => ({
@@ -1376,6 +1384,7 @@ export function DesignerEditor({ designerId, mode, context, navigateTo }: Design
         onOpenChange={setShowAddSkill}
         onAdd={addSkill}
         existingSkills={designerForm.skills.map(s => s.skillId)}
+        availableGlobalSkills={globalSkills}
       />
 
       <AddGoalDialog 
@@ -1394,22 +1403,26 @@ export function DesignerEditor({ designerId, mode, context, navigateTo }: Design
 }
 
 // Helper Components (same as before but with DialogDescription added)
-function AddSkillDialog({ open, onOpenChange, onAdd, existingSkills }: {
+function AddSkillDialog({ open, onOpenChange, onAdd, existingSkills, availableGlobalSkills }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onAdd: (skillId: string, level: number) => void;
+  onAdd: (skillId: string, level: number, skillName: string) => void; // Added skillName
   existingSkills: string[];
+  availableGlobalSkills: GlobalSkill[];
 }) {
   const [selectedSkillId, setSelectedSkillId] = useState('');
   const [level, setLevel] = useState(50);
 
-  const availableSkills = mockSkills.filter(skill => !existingSkills.includes(skill.id));
+  const availableSkills = availableGlobalSkills.filter(skill => !existingSkills.includes(skill.id));
 
   const handleSubmit = () => {
     if (selectedSkillId) {
-      onAdd(selectedSkillId, level);
-      setSelectedSkillId('');
-      setLevel(50);
+      const skillToAdd = availableGlobalSkills.find(s => s.id === selectedSkillId);
+      if (skillToAdd) {
+        onAdd(selectedSkillId, level, skillToAdd.name);
+        setSelectedSkillId('');
+        setLevel(50);
+      }
     }
   };
 

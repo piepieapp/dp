@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -7,7 +7,8 @@ import { Progress } from './ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Plus, Search, Calendar, Users, Clock, Edit, Eye } from 'lucide-react';
 import { AppContextType } from '../App';
-import { mockDesigners } from '../services/mockData';
+import { dataStorage } from '../services/dataStorage';
+import { Project, Designer } from '../types';
 
 interface ProjectsManagerProps {
   context: AppContextType;
@@ -16,29 +17,57 @@ interface ProjectsManagerProps {
 }
 
 export function ProjectsManager({ context, navigateTo }: ProjectsManagerProps) {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [designers, setDesigners] = useState<Designer[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
-  // Отримуємо всі проекти з mockDesigners
-  const allProjects = mockDesigners.flatMap(designer => 
-    designer.projects.map(project => ({
-      ...project,
-      assignedDesigner: designer.name
-    }))
-  );
+  useEffect(() => {
+    setIsLoading(true);
+    const projectsData = dataStorage.getProjects();
+    const designersData = dataStorage.getDesigners();
+    setProjects(projectsData || []);
+    setDesigners(designersData || []);
+    setIsLoading(false);
+  }, [context.dataVersion]); // Додано context.dataVersion
 
-  const filteredProjects = allProjects.filter(project => {
-    const matchesSearch = project.name.toLowerCase().includes(searchTerm.toLowerCase());
+  const enrichedProjects = projects.map(project => {
+    let assignedDesignersDisplay = 'N/A';
+    if (project.teamMembers && project.teamMembers.length > 0) {
+      assignedDesignersDisplay = project.teamMembers.map(member => {
+        const designer = designers.find(d => d.id === member.designerId);
+        return designer ? designer.name : member.designerId;
+      }).slice(0, 2).join(', ');
+      if (project.teamMembers.length > 2) {
+        assignedDesignersDisplay += `, +${project.teamMembers.length - 2}`;
+      }
+    } else if ((project as any).assignedDesigner) { // Fallback for old structure from mock
+        assignedDesignersDisplay = (project as any).assignedDesigner;
+    }
+    return {
+      ...project,
+      assignedDesignerDisplay: assignedDesignersDisplay
+    };
+  });
+
+  const filteredProjects = enrichedProjects.filter(project => {
+    const matchesSearch = project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         (project.description || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || project.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
   const projectStats = {
-    total: allProjects.length,
-    active: allProjects.filter(p => p.status === 'Active').length,
-    completed: allProjects.filter(p => p.status === 'Completed').length,
-    onHold: allProjects.filter(p => p.status === 'On Hold').length
+    total: projects.length,
+    active: projects.filter(p => p.status === 'Active').length,
+    completed: projects.filter(p => p.status === 'Completed').length,
+    onHold: projects.filter(p => p.status === 'On Hold').length
   };
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center h-full">Завантаження проектів...</div>;
+  }
 
   return (
     <div className="space-y-6">
@@ -175,7 +204,7 @@ export function ProjectsManager({ context, navigateTo }: ProjectsManagerProps) {
               </div>
 
               <div className="text-sm text-muted-foreground">
-                <span>Виконавець: {project.assignedDesigner}</span>
+                <span>Виконавці: {project.assignedDesignerDisplay}</span>
               </div>
 
               {/* Action Buttons */}
@@ -208,6 +237,27 @@ export function ProjectsManager({ context, navigateTo }: ProjectsManagerProps) {
                     <Edit className="w-4 h-4" />
                   </Button>
                 )}
+                  {context.currentUser.permissions.includes('create_modules') && ( // Assuming same permission for delete
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-red-600 hover:text-red-700 hover:bg-red-100"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (window.confirm(`Ви впевнені, що хочете видалити проект "${project.name}"?`)) {
+                          dataStorage.deleteProject(project.id);
+                          context.triggerDataRefresh();
+                          context.addNotification({
+                            title: 'Проект видалено',
+                            message: `Проект "${project.name}" успішно видалено.`,
+                            type: 'success'
+                          });
+                        }
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  )}
               </div>
             </CardContent>
           </Card>

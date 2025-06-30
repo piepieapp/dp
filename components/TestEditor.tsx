@@ -18,6 +18,8 @@ import {
   RotateCcw, Award, BarChart, Users
 } from 'lucide-react';
 import { AppContextType } from '../App';
+import { dataStorage } from '../services/dataStorage';
+import { Test as GlobalTest, Question as GlobalQuestion, LearningModule as GlobalLearningModule } from '../types';
 
 interface TestEditorProps {
   testId?: string;
@@ -90,33 +92,85 @@ export function TestEditor({ testId, moduleId, mode, context, navigateTo }: Test
   const [showPreview, setShowPreview] = useState(false);
 
   useEffect(() => {
-    if (mode === 'edit' && testId) {
-      // Load existing test data
-      setTestForm(prev => ({
-        ...prev,
-        title: 'Основи UX досліджень - Перевірка знань',
-        description: 'Тест для перевірки засвоєння матеріалу з основ UX досліджень',
-        instructions: 'Відповідайте на питання уважно. У вас є 30 хвилин.',
-        questions: [
-          {
-            id: '1',
-            type: 'multiple-choice',
-            question: 'Що є основною метою UX дослідження?',
-            points: 5,
-            options: [
-              'Створення красивого дизайну',
-              'Розуміння потреб користувачів',
-              'Збільшення продажів',
-              'Покращення технічних характеристик'
-            ],
-            correctAnswers: [1],
-            required: true,
-            order: 1
-          }
-        ]
-      }));
+    if (mode === 'edit' && testId && moduleId) {
+      setIsLoading(true);
+      const modules = dataStorage.getLearningModules();
+      const module = modules.find(m => m.id === moduleId);
+      const test = module?.tests?.find(t => t.id === testId);
+
+      if (test) {
+        setTestForm({
+          title: test.title,
+          description: (test as any).description || '',
+          instructions: (test as any).instructions || '',
+          passingScore: test.passingScore,
+          timeLimit: (test as any).timeLimit || 30,
+          maxAttempts: (test as any).maxAttempts || 3,
+          questions: (test.questions || []).map((q: GlobalQuestion, index: number) => {
+            let correctAnswers: (string | number)[] = [];
+            if (q.correctAnswer) {
+              if (q.type === 'multiple-choice' || q.type === 'true-false') {
+                const optIndex = (q.options || []).indexOf(q.correctAnswer);
+                if (optIndex !== -1) correctAnswers = [optIndex];
+              } else if (q.type === 'multiple-select' && q.options) {
+                correctAnswers = q.correctAnswer.split(',').map(ca => (q.options || []).indexOf(ca)).filter(idx => idx !== -1);
+              } else { // text, rating
+                correctAnswers = [q.correctAnswer];
+              }
+            }
+            return {
+              id: q.id,
+              type: q.type as Question['type'],
+              question: q.question,
+              explanation: (q as any).explanation || '',
+              points: (q as any).points || 5,
+              options: q.options || [],
+              correctAnswers: correctAnswers,
+              required: (q as any).required !== undefined ? (q as any).required : true,
+              order: (q as any).order || index + 1,
+            };
+          }),
+          settings: (test as any).settings || {
+            shuffleQuestions: false,
+            shuffleOptions: true,
+            showResults: true,
+            allowReview: true,
+            showCorrectAnswers: true,
+            retakeAllowed: true,
+            requirePassing: false,
+            certificateEligible: false
+          },
+          isPublished: (test as any).isPublished || false,
+        });
+      } else {
+        context.addNotification({ title: 'Помилка', message: `Тест з ID ${testId} в модулі ${moduleId} не знайдено.`, type: 'error' });
+        if (moduleId) navigateTo({ section: 'learning', subsection: 'module-editor', id: moduleId, mode: 'edit' });
+        else navigateTo({ section: 'learning' });
+      }
+      setIsLoading(false);
+    } else if (mode === 'create') {
+      setTestForm({
+        title: '',
+        description: '',
+        instructions: '',
+        passingScore: 70,
+        timeLimit: 30,
+        maxAttempts: 3,
+        questions: [],
+        settings: {
+          shuffleQuestions: false,
+          shuffleOptions: true,
+          showResults: true,
+          allowReview: true,
+          showCorrectAnswers: true,
+          retakeAllowed: true,
+          requirePassing: false,
+          certificateEligible: false
+        },
+        isPublished: false
+      });
     }
-  }, [mode, testId]);
+  }, [mode, testId, moduleId, context, navigateTo]);
 
   const handleSave = async () => {
     setIsLoading(true);
@@ -131,8 +185,54 @@ export function TestEditor({ testId, moduleId, mode, context, navigateTo }: Test
       return;
     }
 
+    const questionsToSave: GlobalQuestion[] = testForm.questions.map(q => {
+      let correctAnswerValue: string | undefined = undefined;
+      if (q.correctAnswers && q.options && q.correctAnswers.length > 0) {
+        if (q.type === 'multiple-choice' || q.type === 'true-false') {
+          correctAnswerValue = q.options[q.correctAnswers[0] as number];
+        } else if (q.type === 'multiple-select') {
+          correctAnswerValue = q.correctAnswers.map(idx => q.options![idx as number]).join(',');
+        }
+      } else if (q.type === 'text' && q.correctAnswers.length > 0) {
+         correctAnswerValue = q.correctAnswers.join(',');
+      }
+
+      return {
+        id: q.id || Date.now().toString() + Math.random(),
+        question: q.question,
+        type: q.type,
+        options: q.options,
+        correctAnswer: correctAnswerValue,
+        // explanation: q.explanation, // Add if defined in GlobalQuestion
+        // points: q.points, // Add if defined in GlobalQuestion
+        // required: q.required, // Add if defined in GlobalQuestion
+        // order: q.order, // Add if defined in GlobalQuestion
+      };
+    });
+
+    const testToSave: GlobalTest = {
+      id: mode === 'create' ? Date.now().toString() : testId!,
+      title: testForm.title,
+      questions: questionsToSave,
+      passingScore: testForm.passingScore,
+      attempts: [], // Default to empty attempts array
+      // Add other fields from TestForm if they exist in GlobalTest type
+      // description: testForm.description,
+      // instructions: testForm.instructions,
+      // timeLimit: testForm.timeLimit,
+      // maxAttempts: testForm.maxAttempts,
+      // settings: testForm.settings,
+      // isPublished: testForm.isPublished,
+    };
+
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      if (!moduleId) {
+        context.addNotification({ title: 'Помилка', message: "ID модуля відсутній. Неможливо зберегти тест.", type: 'error' });
+        setIsLoading(false);
+        return;
+      }
+      dataStorage.saveTest(testToSave, moduleId);
+      context.triggerDataRefresh(); // <--- Виклик triggerDataRefresh
       
       context.addNotification({
         title: mode === 'create' ? 'Тест створено' : 'Тест оновлено',
@@ -148,11 +248,12 @@ export function TestEditor({ testId, moduleId, mode, context, navigateTo }: Test
           mode: 'edit' 
         });
       } else {
-        navigateTo({ section: 'learning' });
+        navigateTo({ section: 'learning' }); // Fallback
       }
     } catch (error) {
+      console.error("Error saving test:", error);
       context.addNotification({
-        title: 'Помилка',
+        title: 'Помилка збереження',
         message: 'Не вдалось зберегти тест',
         type: 'error'
       });

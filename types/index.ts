@@ -61,8 +61,10 @@ export interface Project {
   startDate: string;
   endDate?: string;
   deadline: string;
+  priority?: 'Low' | 'Medium' | 'High'; // Додано пріоритет
   hoursSpent: number;
   tasks: Task[];
+  teamMembers?: { designerId: string, role: string, allocation?: number }[]; // Додано команду
 }
 
 export interface Task {

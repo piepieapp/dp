@@ -43,6 +43,8 @@ export interface AppContextType {
     role: 'admin' | 'team_lead' | 'designer';
     permissions: string[];
   };
+  dataVersion: number;
+  triggerDataRefresh: () => void;
 }
 
 interface NavigationState {
@@ -56,6 +58,8 @@ interface NavigationState {
 
 export default function App() {
   const [navigation, setNavigation] = useState<NavigationState>({ section: 'dashboard' });
+  const [navigation, setNavigation] = useState<NavigationState>({ section: 'dashboard' });
+  const [dataVersion, setDataVersion] = useState(0); // <--- Новий стан
   const [notifications, setNotifications] = useState<AppContextType['notifications']>([
     {
       id: '1',
@@ -108,6 +112,8 @@ export default function App() {
     setNotifications(prev => [newNotification, ...prev]);
   };
 
+  const triggerDataRefresh = () => setDataVersion(v => v + 1); // <--- Нова функція
+
   const appContext: AppContextType = {
     notifications,
     addNotification,
@@ -116,7 +122,9 @@ export default function App() {
       name: 'Олександр Коваленко',
       role: 'team_lead',
       permissions: ['manage_team', 'assign_modules', 'view_analytics', 'create_modules', 'edit_skills']
-    }
+    },
+    dataVersion,         // <--- Додано в контекст
+    triggerDataRefresh   // <--- Додано в контекст
   };
 
   const navigateTo = (newNav: Partial<NavigationState>) => {

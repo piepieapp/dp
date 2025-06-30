@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Progress } from './ui/progress';
@@ -16,6 +16,8 @@ import {
   Award, BarChart, AlertCircle, Calendar
 } from 'lucide-react';
 import { AppContextType } from '../App';
+import { dataStorage } from '../services/dataStorage';
+import { LearningModule as GlobalLearningModule, Designer, Lesson as GlobalLesson, Test as GlobalTest } from '../types';
 
 interface ModuleDetailsProps {
   moduleId: string;
@@ -23,125 +25,47 @@ interface ModuleDetailsProps {
   navigateTo: (nav: any) => void;
 }
 
-// Mock data для модуля
-const mockModule = {
-  id: 'module-1',
-  title: 'Advanced UX Research',
-  description: 'Поглиблений курс з UX дослідження, що включає сучасні методи збору та аналізу даних користувачів',
-  category: 'UX Research',
-  difficulty: 'Advanced',
-  estimatedTime: '8 годин',
-  createdBy: 'Олександр Коваленко',
-  createdDate: '2024-01-15',
-  status: 'Published',
-  enrolledCount: 12,
-  completionRate: 75,
-  lessons: [
-    {
-      id: 'lesson-1',
-      title: 'Введення в UX дослідження',
-      type: 'video',
-      duration: '15 хв',
-      completed: true,
-      content: 'Основи UX дослідження та його роль в дизайн процесі'
-    },
-    {
-      id: 'lesson-2',
-      title: 'Методи збору даних',
-      type: 'article',
-      duration: '25 хв',
-      completed: true,
-      content: 'Інтерв\'ю, анкетування, спостереження'
-    },
-    {
-      id: 'lesson-3',
-      title: 'Аналіз користувачів',
-      type: 'interactive',
-      duration: '35 хв',
-      completed: false,
-      content: 'Створення персон та карт користувацьких подорожей'
-    },
-    {
-      id: 'lesson-4',
-      title: 'Тестування прототипів',
-      type: 'video',
-      duration: '20 хв',
-      completed: false,
-      content: 'Планування та проведення юзабіліті тестів'
-    }
-  ],
-  tests: [
-    {
-      id: 'test-1',
-      title: 'Основи UX дослідження',
-      questions: 10,
-      timeLimit: '20 хв',
-      passingScore: 80,
-      attempts: 3,
-      bestScore: 85,
-      status: 'completed'
-    },
-    {
-      id: 'test-2',
-      title: 'Методи дослідження',
-      questions: 15,
-      timeLimit: '30 хв',
-      passingScore: 80,
-      attempts: 0,
-      bestScore: null,
-      status: 'available'
-    }
-  ],
-  resources: [
-    {
-      id: 'resource-1',
-      title: 'UX Research Toolkit',
-      type: 'pdf',
-      url: '#',
-      description: 'Збірка шаблонів для проведення досліджень'
-    },
-    {
-      id: 'resource-2',
-      title: 'Interview Script Template',
-      type: 'document',
-      url: '#',
-      description: 'Шаблон для структурованих інтерв\'ю'
-    },
-    {
-      id: 'resource-3',
-      title: 'Usability Testing Checklist',
-      type: 'link',
-      url: '#',
-      description: 'Чек-лист для проведення юзабіліті тестів'
-    }
-  ],
-  assignments: [
-    {
-      id: 'assignment-1',
-      title: 'Проведіть UX дослідження',
-      description: 'Оберіть продукт та проведіть повне UX дослідження з використанням вивчених методів',
-      dueDate: '2024-12-30',
-      status: 'pending',
-      submissions: 8
-    }
-  ],
-  enrolledUsers: [
-    { id: '1', name: 'Марія Петренко', progress: 85, status: 'in_progress' },
-    { id: '2', name: 'Анна Сидоренко', progress: 100, status: 'completed' },
-    { id: '3', name: 'Дмитро Коваленко', progress: 45, status: 'in_progress' },
-    { id: '4', name: 'Олена Іваненко', progress: 90, status: 'in_progress' }
-  ]
-};
-
 export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsProps) {
-  const [showAddLesson, setShowAddLesson] = useState(false);
-  const [showAddTest, setShowAddTest] = useState(false);
+  const [module, setModule] = useState<GlobalLearningModule | null>(null);
+  const [designers, setDesigners] = useState<Designer[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [showAssignModule, setShowAssignModule] = useState(false);
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
+  const [assignDeadline, setAssignDeadline] = useState('');
 
-  const module = mockModule; // В реальному додатку тут буде пошук по moduleId
+  // States for add lesson/test dialogs (if they are part of this component)
+  // const [showAddLesson, setShowAddLesson] = useState(false);
+  // const [showAddTest, setShowAddTest] = useState(false);
 
-  const getTypeIcon = (type: string) => {
+  useEffect(() => {
+    setIsLoading(true);
+    const modules = dataStorage.getLearningModules();
+    const currentModule = modules.find(m => m.id === moduleId);
+    setModule(currentModule || null);
+
+    const designersData = dataStorage.getDesigners();
+    setDesigners(designersData || []);
+
+    setIsLoading(false);
+  }, [moduleId]);
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center h-full">Завантаження деталей модуля...</div>;
+  }
+
+  if (!module) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center">
+          <AlertCircle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+          <h3>Модуль не знайдено</h3>
+          <p className="text-muted-foreground">Можливо, модуль було видалено або ID неправильний.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const getTypeIcon = (type: GlobalLesson['type']) => {
     switch (type) {
       case 'video': return <Video className="w-4 h-4" />;
       case 'article': return <FileText className="w-4 h-4" />;
@@ -160,9 +84,19 @@ export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsPr
     }
   };
 
-  const completedLessons = module.lessons.filter(l => l.completed).length;
-  const totalLessons = module.lessons.length;
-  const progressPercentage = (completedLessons / totalLessons) * 100;
+  // Calculate enrolled users and completion rate based on actual designer assignments
+  const enrolledUsersList = designers.filter(d => d.learningModules?.some(lm => lm.id === module.id));
+  const enrolledCount = enrolledUsersList.length;
+  const completedByEnrolled = enrolledUsersList.filter(d =>
+    d.learningModules?.find(lm => lm.id === module.id)?.status === 'Completed'
+  ).length;
+  const completionRate = enrolledCount > 0 ? Math.round((completedByEnrolled / enrolledCount) * 100) : 0;
+
+
+  const moduleLessons = module.lessons || [];
+  const completedLessons = moduleLessons.filter(l => l.completed).length;
+  const totalLessons = moduleLessons.length;
+  const progressPercentage = totalLessons > 0 ? Math.round((completedLessons / totalLessons) * 100) : 0;
 
   return (
     <div className="space-y-6">
@@ -179,11 +113,11 @@ export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsPr
           <div className="flex items-center gap-6 text-sm text-muted-foreground">
             <div className="flex items-center gap-1">
               <Clock className="w-4 h-4" />
-              {module.estimatedTime}
+              {module.estimatedTime} год
             </div>
             <div className="flex items-center gap-1">
               <Users className="w-4 h-4" />
-              {module.enrolledCount} учасників
+              {enrolledCount} учасників
             </div>
             <div className="flex items-center gap-1">
               <Target className="w-4 h-4" />
@@ -191,7 +125,7 @@ export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsPr
             </div>
             <div className="flex items-center gap-1">
               <Award className="w-4 h-4" />
-              {module.completionRate}% завершили
+              {completionRate}% завершили
             </div>
           </div>
         </div>
@@ -204,7 +138,7 @@ export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsPr
             </Button>
           )}
           {context.currentUser.permissions.includes('manage_team') && (
-            <Button variant="outline">
+            <Button variant="outline" onClick={() => navigateTo({ section: 'learning', subsection: 'module-editor', id: module?.id, mode: 'edit' })}>
               <Edit className="w-4 h-4 mr-2" />
               Редагувати модуль
             </Button>
@@ -218,7 +152,7 @@ export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsPr
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Прогрес</p>
+                <p className="text-sm text-muted-foreground">Прогрес (загальний)</p>
                 <p className="text-2xl font-bold">{Math.round(progressPercentage)}%</p>
               </div>
               <BarChart className="w-8 h-8 text-blue-500" />
@@ -245,7 +179,7 @@ export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsPr
               <div>
                 <p className="text-sm text-muted-foreground">Тести</p>
                 <p className="text-2xl font-bold">
-                  {module.tests.filter(t => t.status === 'completed').length}/{module.tests.length}
+                  {(module.tests || []).filter(t => (t as any).status === 'completed').length}/{(module.tests || []).length}
                 </p>
               </div>
               <Target className="w-8 h-8 text-purple-500" />
@@ -258,7 +192,7 @@ export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsPr
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Учасники</p>
-                <p className="text-2xl font-bold">{module.enrolledCount}</p>
+                <p className="text-2xl font-bold">{enrolledCount}</p>
               </div>
               <Users className="w-8 h-8 text-orange-500" />
             </div>
@@ -281,7 +215,7 @@ export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsPr
           <div className="flex justify-between items-center">
             <h3 className="text-lg font-semibold">Уроки модуля</h3>
             {context.currentUser.permissions.includes('manage_team') && (
-              <Button onClick={() => setShowAddLesson(true)}>
+               <Button onClick={() => navigateTo({ section: 'learning', subsection: 'lesson-editor', moduleId: module?.id, mode: 'create' })}>
                 <Plus className="w-4 h-4 mr-2" />
                 Додати урок
               </Button>
@@ -289,7 +223,7 @@ export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsPr
           </div>
 
           <div className="space-y-3">
-            {module.lessons.map((lesson, index) => (
+            {(module.lessons || []).map((lesson, index) => (
               <Card key={lesson.id} className="hover:shadow-md transition-shadow cursor-pointer"
                     onClick={() => navigateTo({ 
                       section: 'learning', 
@@ -329,7 +263,7 @@ export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsPr
           <div className="flex justify-between items-center">
             <h3 className="text-lg font-semibold">Тести та перевірки</h3>
             {context.currentUser.permissions.includes('manage_team') && (
-              <Button onClick={() => setShowAddTest(true)}>
+              <Button onClick={() => navigateTo({ section: 'learning', subsection: 'test-editor', moduleId: module?.id, mode: 'create' })}>
                 <Plus className="w-4 h-4 mr-2" />
                 Створити тест
               </Button>
@@ -337,13 +271,13 @@ export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsPr
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {module.tests.map(test => (
+            {(module.tests || []).map(test => (
               <Card key={test.id} className="hover:shadow-md transition-shadow">
                 <CardHeader>
                   <div className="flex justify-between items-start">
                     <CardTitle className="text-base">{test.title}</CardTitle>
-                    <Badge variant={test.status === 'completed' ? 'default' : 'secondary'}>
-                      {test.status === 'completed' ? 'Завершено' : 'Доступний'}
+                    <Badge variant={(test as any).status === 'completed' ? 'default' : 'secondary'}>
+                      {(test as any).status === 'completed' ? 'Завершено' : 'Доступний'}
                     </Badge>
                   </div>
                 </CardHeader>
@@ -351,11 +285,11 @@ export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsPr
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
                       <span className="text-muted-foreground">Питань:</span>
-                      <span className="ml-2 font-medium">{test.questions}</span>
+                      <span className="ml-2 font-medium">{(test.questions || []).length}</span>
                     </div>
                     <div>
                       <span className="text-muted-foreground">Час:</span>
-                      <span className="ml-2 font-medium">{test.timeLimit}</span>
+                      <span className="ml-2 font-medium">{(test as any).timeLimit || 'N/A'}</span>
                     </div>
                     <div>
                       <span className="text-muted-foreground">Прохідний бал:</span>
@@ -363,14 +297,14 @@ export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsPr
                     </div>
                     <div>
                       <span className="text-muted-foreground">Спроби:</span>
-                      <span className="ml-2 font-medium">{test.attempts}</span>
+                      <span className="ml-2 font-medium">{(test.attempts || []).length}</span>
                     </div>
                   </div>
                   
-                  {test.bestScore && (
+                  {(test as any).bestScore && (
                     <div className="p-2 bg-green-50 rounded border border-green-200">
                       <div className="text-sm text-green-800">
-                        Найкращий результат: <span className="font-bold">{test.bestScore}%</span>
+                        Найкращий результат: <span className="font-bold">{(test as any).bestScore}%</span>
                       </div>
                     </div>
                   )}
@@ -396,7 +330,7 @@ export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsPr
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {module.resources.map(resource => (
+            {((module as any).resources || []).map((resource: any) => (
               <Card key={resource.id} className="hover:shadow-md transition-shadow cursor-pointer">
                 <CardContent className="p-4">
                   <div className="flex items-start gap-3">
@@ -419,7 +353,7 @@ export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsPr
           <div className="flex justify-between items-center">
             <h3 className="text-lg font-semibold">Практичні завдання</h3>
             {context.currentUser.permissions.includes('manage_team') && (
-              <Button>
+              <Button disabled> {/* TODO: Implement assignment creation */}
                 <Plus className="w-4 h-4 mr-2" />
                 Створити завдання
               </Button>
@@ -427,7 +361,7 @@ export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsPr
           </div>
 
           <div className="space-y-4">
-            {module.assignments.map(assignment => (
+            {((module as any).assignments || []).map((assignment: any) => (
               <Card key={assignment.id}>
                 <CardHeader>
                   <div className="flex justify-between items-start">
@@ -452,13 +386,14 @@ export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsPr
                         {assignment.submissions} подань
                       </div>
                     </div>
-                    <Button variant="outline" size="sm">
+                    <Button variant="outline" size="sm" disabled> {/* TODO: Implement view submissions */}
                       Переглянути подання
                     </Button>
                   </div>
                 </CardContent>
               </Card>
             ))}
+             {((module as any).assignments || []).length === 0 && <p className="text-sm text-muted-foreground">Завдань для цього модуля ще немає.</p>}
           </div>
         </TabsContent>
 
@@ -466,39 +401,43 @@ export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsPr
           <div className="flex justify-between items-center">
             <h3 className="text-lg font-semibold">Учасники модуля</h3>
             <div className="text-sm text-muted-foreground">
-              {module.enrolledCount} активних учасників
+              {enrolledCount} активних учасників
             </div>
           </div>
 
           <div className="space-y-3">
-            {module.enrolledUsers.map(user => (
-              <Card key={user.id} className="hover:shadow-md transition-shadow cursor-pointer"
-                    onClick={() => navigateTo({ 
-                      section: 'designers', 
-                      subsection: 'designer-profile', 
-                      id: user.id 
-                    })}>
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center">
-                        {user.name.split(' ').map(n => n[0]).join('')}
+            {enrolledUsersList.map(user => {
+              const userModuleData = user.learningModules?.find(lm => lm.id === module.id);
+              return (
+                <Card key={user.id} className="hover:shadow-md transition-shadow cursor-pointer"
+                      onClick={() => navigateTo({
+                        section: 'designers',
+                        subsection: 'designer-profile',
+                        id: user.id
+                      })}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center">
+                          {user.name.split(' ').map(n => n[0]).join('')}
+                        </div>
+                        <div>
+                          <h4 className="font-medium">{user.name}</h4>
+                          <p className="text-sm text-muted-foreground">
+                            {userModuleData?.status === 'Completed' ? 'Завершено' : 'В процесі'}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <h4 className="font-medium">{user.name}</h4>
-                        <p className="text-sm text-muted-foreground">
-                          {user.status === 'completed' ? 'Завершено' : 'В процесі'}
-                        </p>
+                      <div className="text-right">
+                        <div className="font-medium">{userModuleData?.progress || 0}%</div>
+                        <Progress value={userModuleData?.progress || 0} className="w-20 mt-1" />
                       </div>
                     </div>
-                    <div className="text-right">
-                      <div className="font-medium">{user.progress}%</div>
-                      <Progress value={user.progress} className="w-20 mt-1" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                  </CardContent>
+                </Card>
+              );
+            })}
+            {enrolledUsersList.length === 0 && <p className="text-sm text-muted-foreground">Ще ніхто не призначений на цей модуль.</p>}
           </div>
         </TabsContent>
 
@@ -512,11 +451,11 @@ export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsPr
                 <div className="space-y-3">
                   <div className="flex justify-between">
                     <span className="text-sm">Завершили</span>
-                    <span className="font-medium">{Math.round(module.completionRate)}%</span>
+                    <span className="font-medium">{completionRate}%</span>
                   </div>
-                  <Progress value={module.completionRate} />
+                  <Progress value={completionRate} />
                   <div className="text-xs text-muted-foreground">
-                    {Math.round(module.enrolledCount * module.completionRate / 100)} з {module.enrolledCount} учасників
+                    {completedByEnrolled} з {enrolledCount} учасників
                   </div>
                 </div>
               </CardContent>
@@ -567,15 +506,10 @@ export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsPr
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-3 max-h-60 overflow-y-auto">
-              {/* Список користувачів для вибору */}
-              {[
-                { id: '5', name: 'Іван Петров', position: 'Junior Designer' },
-                { id: '6', name: 'Оксана Коваль', position: 'Middle Designer' },
-                { id: '7', name: 'Сергій Мельник', position: 'Senior Designer' }
-              ].map(user => (
+              {designers.map(user => (
                 <div key={user.id} className="flex items-center space-x-2">
                   <Checkbox
-                    id={user.id}
+                    id={`assign-${user.id}`}
                     checked={selectedUsers.includes(user.id)}
                     onCheckedChange={(checked) => {
                       if (checked) {
@@ -585,7 +519,7 @@ export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsPr
                       }
                     }}
                   />
-                  <Label htmlFor={user.id} className="flex-1 cursor-pointer">
+                  <Label htmlFor={`assign-${user.id}`} className="flex-1 cursor-pointer">
                     <div>
                       <div className="font-medium">{user.name}</div>
                       <div className="text-sm text-muted-foreground">{user.position}</div>
@@ -596,27 +530,67 @@ export function ModuleDetails({ moduleId, context, navigateTo }: ModuleDetailsPr
             </div>
             
             <div className="space-y-2">
-              <Label>Дедлайн</Label>
-              <Input type="date" />
+              <Label htmlFor="assign-deadline">Дедлайн</Label>
+              <Input id="assign-deadline" type="date" value={assignDeadline} onChange={e => setAssignDeadline(e.target.value)} />
             </div>
             
             <div className="space-y-2">
-              <Label>Коментар</Label>
+              <Label>Коментар (необов'язково)</Label>
               <Textarea placeholder="Додайте інструкції або коментар..." />
             </div>
             
             <div className="flex gap-2 pt-4">
               <Button 
                 onClick={() => {
+                  if (selectedUsers.length === 0 || !assignDeadline || !module) {
+                    context.addNotification({
+                      title: 'Помилка',
+                      message: 'Оберіть користувачів та вкажіть дедлайн',
+                      type: 'error',
+                    });
+                    return;
+                  }
+                  selectedUsers.forEach(userId => {
+                    const userToUpdate = designers.find(d => d.id === userId);
+                    if (userToUpdate) {
+                      const alreadyAssigned = userToUpdate.learningModules?.find(lm => lm.id === module.id);
+                      if (alreadyAssigned) {
+                        console.warn(`Module ${module.title} already assigned to ${userToUpdate.name}`);
+                        // Optionally, update deadline or notify user
+                        return;
+                      }
+
+                      const newAssignedModule: GlobalLearningModule = {
+                        id: module.id,
+                        title: module.title,
+                        description: module.description,
+                        category: module.category,
+                        difficulty: module.difficulty,
+                        estimatedTime: module.estimatedTime,
+                        status: 'Not Started',
+                        progress: 0,
+                        assignedDate: new Date().toISOString(),
+                        deadline: assignDeadline,
+                        tests: module.tests || [],
+                        lessons: module.lessons || [],
+                      };
+                      const updatedUser = {
+                        ...userToUpdate,
+                        learningModules: [...(userToUpdate.learningModules || []), newAssignedModule],
+                      };
+                      dataStorage.saveDesigner(updatedUser);
+                    }
+                  });
                   context.addNotification({
                     title: 'Модуль призначено',
                     message: `Модуль "${module.title}" призначено ${selectedUsers.length} користувачам`,
-                    type: 'success'
+                    type: 'success',
                   });
                   setShowAssignModule(false);
                   setSelectedUsers([]);
+                  setAssignDeadline('');
                 }}
-                disabled={selectedUsers.length === 0}
+                disabled={selectedUsers.length === 0 || !assignDeadline}
               >
                 Призначити ({selectedUsers.length})
               </Button>

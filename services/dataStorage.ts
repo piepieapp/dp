@@ -1,9 +1,11 @@
+import { Project } from '../types'; // Імпортуємо Project
+
 // Enhanced Data Storage Service для збереження всіх даних в localStorage
 export interface AppData {
   designers: any[];
   learningModules: any[];
   skills: any[];
-  projects: any[];
+  projects: Project[];
   tests: any[];
   lessons: any[];
   settings: any;
@@ -92,7 +94,7 @@ class DataStorageService {
         designers: oldData.designers || [],
         learningModules: oldData.learningModules || [],
         skills: oldData.skills || [],
-        projects: oldData.projects || [],
+        projects: oldData.projects || [], // Залишаємо поки any для сумісності міграції
         tests: oldData.tests || [],
         lessons: oldData.lessons || [],
         settings: oldData.settings || {},
@@ -203,7 +205,7 @@ class DataStorageService {
             designers: data.designers || [],
             learningModules: data.learningModules || [],
             skills: data.skills || [],
-            projects: [],
+            projects: data.projects || [], // Зберігаємо існуючі проекти при мінімальному збереженні
             tests: [],
             lessons: [],
             settings: {},
@@ -375,6 +377,57 @@ class DataStorageService {
     }
   }
 
+  deleteDesigner(designerId: string): void {
+    try {
+      const data = this.getAllData();
+      if (!data || !data.designers) return;
+      // Також можна видалити пов'язані зображення, якщо потрібно
+      const designerToDelete = data.designers.find(d => d.id === designerId);
+      if (designerToDelete && designerToDelete.avatar && !designerToDelete.avatar.startsWith('http')) {
+        this.deleteImage(designerToDelete.avatar);
+      }
+      data.designers = data.designers.filter(d => d.id !== designerId);
+      // Також потрібно оновити проекти та модулі, якщо дизайнери там згадуються (виходить за рамки простого видалення)
+      this.saveAllData({ designers: data.designers });
+    } catch (error) {
+      console.error('Failed to delete designer:', error);
+    }
+  }
+    }
+  }
+
+  deleteLearningModule(moduleId: string): void {
+    try {
+      const data = this.getAllData();
+      if (!data) return;
+
+      // Видаляємо модуль зі списку модулів
+      data.learningModules = (data.learningModules || []).filter(m => m.id !== moduleId);
+
+      // Видаляємо пов'язані уроки та тести
+      data.lessons = (data.lessons || []).filter(l => l.moduleId !== moduleId);
+      data.tests = (data.tests || []).filter(t => t.moduleId !== moduleId);
+
+      // Видаляємо модуль з призначень у дизайнерів
+      if (data.designers) {
+        data.designers.forEach(designer => {
+          if (designer.learningModules) {
+            designer.learningModules = designer.learningModules.filter((m: any) => m.id !== moduleId);
+          }
+        });
+      }
+
+      this.saveAllData({
+        learningModules: data.learningModules,
+        lessons: data.lessons,
+        tests: data.tests,
+        designers: data.designers
+      });
+    } catch (error) {
+      console.error('Failed to delete learning module:', error);
+    }
+  }
+
   // Get designers with safe image resolution
   getDesigners(): any[] {
     try {
@@ -445,27 +498,28 @@ class DataStorageService {
     try {
       const data = this.getAllData();
       if (!data) return;
+      if (!data.lessons) data.lessons = [];
+      if (!data.learningModules) data.learningModules = [];
 
-      // Save lesson separately
-      const existingLessonIndex = data.lessons.findIndex(l => l.id === lesson.id);
-      if (existingLessonIndex >= 0) {
-        data.lessons[existingLessonIndex] = { ...lesson, moduleId };
+      const lessonWithModuleId = { ...lesson, moduleId };
+      const existingLessonIndexGlobal = data.lessons.findIndex(l => l.id === lesson.id && l.moduleId === moduleId);
+      if (existingLessonIndexGlobal >= 0) {
+        data.lessons[existingLessonIndexGlobal] = lessonWithModuleId;
       } else {
-        data.lessons.push({ ...lesson, moduleId });
+        data.lessons.push(lessonWithModuleId);
       }
 
-      // Update module
       const moduleIndex = data.learningModules.findIndex(m => m.id === moduleId);
       if (moduleIndex >= 0) {
         if (!data.learningModules[moduleIndex].lessons) {
           data.learningModules[moduleIndex].lessons = [];
         }
-        
-        const lessonInModuleIndex = data.learningModules[moduleIndex].lessons.findIndex(l => l.id === lesson.id);
-        if (lessonInModuleIndex >= 0) {
-          data.learningModules[moduleIndex].lessons[lessonInModuleIndex] = lesson;
+        const lessonsInModule = data.learningModules[moduleIndex].lessons;
+        const existingLessonIndexInModule = lessonsInModule.findIndex(l => l.id === lesson.id);
+        if (existingLessonIndexInModule >= 0) {
+          lessonsInModule[existingLessonIndexInModule] = lesson;
         } else {
-          data.learningModules[moduleIndex].lessons.push(lesson);
+          lessonsInModule.push(lesson);
         }
       }
 
@@ -475,37 +529,74 @@ class DataStorageService {
     }
   }
 
-  saveTest(test: any, moduleId: string): void {
+  deleteLesson(lessonId: string, moduleId: string): void {
     try {
       const data = this.getAllData();
       if (!data) return;
 
-      // Save test separately
-      const existingTestIndex = data.tests.findIndex(t => t.id === test.id);
-      if (existingTestIndex >= 0) {
-        data.tests[existingTestIndex] = { ...test, moduleId };
-      } else {
-        data.tests.push({ ...test, moduleId });
+      data.lessons = (data.lessons || []).filter(l => !(l.id === lessonId && l.moduleId === moduleId));
+
+      const moduleIndex = (data.learningModules || []).findIndex(m => m.id === moduleId);
+      if (moduleIndex >= 0 && data.learningModules[moduleIndex].lessons) {
+        data.learningModules[moduleIndex].lessons = data.learningModules[moduleIndex].lessons.filter((l: any) => l.id !== lessonId);
       }
 
-      // Update module
+      this.saveAllData({ lessons: data.lessons, learningModules: data.learningModules });
+    } catch (error) {
+      console.error('Failed to delete lesson:', error);
+    }
+  }
+
+  saveTest(test: any, moduleId: string): void {
+    try {
+      const data = this.getAllData();
+      if (!data) return;
+      if (!data.tests) data.tests = [];
+      if (!data.learningModules) data.learningModules = [];
+
+      const testWithModuleId = { ...test, moduleId };
+      const existingTestIndexGlobal = data.tests.findIndex(t => t.id === test.id && t.moduleId === moduleId);
+      if (existingTestIndexGlobal >= 0) {
+        data.tests[existingTestIndexGlobal] = testWithModuleId;
+      } else {
+        data.tests.push(testWithModuleId);
+      }
+
       const moduleIndex = data.learningModules.findIndex(m => m.id === moduleId);
       if (moduleIndex >= 0) {
         if (!data.learningModules[moduleIndex].tests) {
           data.learningModules[moduleIndex].tests = [];
         }
-        
-        const testInModuleIndex = data.learningModules[moduleIndex].tests.findIndex(t => t.id === test.id);
-        if (testInModuleIndex >= 0) {
-          data.learningModules[moduleIndex].tests[testInModuleIndex] = test;
+        const testsInModule = data.learningModules[moduleIndex].tests;
+        const existingTestIndexInModule = testsInModule.findIndex(t => t.id === test.id);
+        if (existingTestIndexInModule >= 0) {
+          testsInModule[existingTestIndexInModule] = test;
         } else {
-          data.learningModules[moduleIndex].tests.push(test);
+          testsInModule.push(test);
         }
       }
 
       this.saveAllData({ tests: data.tests, learningModules: data.learningModules });
     } catch (error) {
       console.error('Failed to save test:', error);
+    }
+  }
+
+  deleteTest(testId: string, moduleId: string): void {
+    try {
+      const data = this.getAllData();
+      if (!data) return;
+
+      data.tests = (data.tests || []).filter(t => !(t.id === testId && t.moduleId === moduleId));
+
+      const moduleIndex = (data.learningModules || []).findIndex(m => m.id === moduleId);
+      if (moduleIndex >= 0 && data.learningModules[moduleIndex].tests) {
+        data.learningModules[moduleIndex].tests = data.learningModules[moduleIndex].tests.filter((t: any) => t.id !== testId);
+      }
+
+      this.saveAllData({ tests: data.tests, learningModules: data.learningModules });
+    } catch (error) {
+      console.error('Failed to delete test:', error);
     }
   }
 
@@ -531,13 +622,73 @@ class DataStorageService {
     }
   }
 
-  getSkills(): any[] {
+  deleteSkill(skillId: string): void {
+    try {
+      const data = this.getAllData();
+      if (!data || !data.skills) return;
+      data.skills = data.skills.filter(s => s.id !== skillId);
+      // Також потрібно видалити цю навичку з усіх дизайнерів
+      if (data.designers) {
+        data.designers.forEach(designer => {
+          if (designer.skills) {
+            designer.skills = designer.skills.filter((s: any) => s.skillId !== skillId);
+          }
+        });
+      }
+      this.saveAllData({ skills: data.skills, designers: data.designers });
+    } catch (error) {
+      console.error('Failed to delete skill:', error);
+    }
+  }
+
+  getSkills(): any[] { // Залишаємо any[] для сумісності, але логіка працює з Skill[]
     try {
       const data = this.getAllData();
       return data?.skills || [];
     } catch (error) {
       console.error('Failed to get skills:', error);
       return [];
+    }
+  }
+
+  // Project operations
+  getProjects(): Project[] {
+    try {
+      const data = this.getAllData();
+      return data?.projects || [];
+    } catch (error) {
+      console.error('Failed to get projects:', error);
+      return [];
+    }
+  }
+
+  saveProject(project: Project): void {
+    try {
+      const data = this.getAllData();
+      if (!data) return;
+      if (!data.projects) data.projects = [];
+
+      const existingIndex = data.projects.findIndex(p => p.id === project.id);
+      if (existingIndex >= 0) {
+        data.projects[existingIndex] = project;
+      } else {
+        data.projects.push(project);
+      }
+      this.saveAllData({ projects: data.projects });
+    } catch (error) {
+      console.error('Failed to save project:', error);
+    }
+  }
+
+  deleteProject(projectId: string): void {
+    try {
+      const data = this.getAllData();
+      if (!data || !data.projects) return;
+
+      data.projects = data.projects.filter(p => p.id !== projectId);
+      this.saveAllData({ projects: data.projects });
+    } catch (error) {
+      console.error('Failed to delete project:', error);
     }
   }
 
@@ -609,7 +760,7 @@ class DataStorageService {
       designers: [],
       learningModules: [],
       skills: [],
-      projects: [],
+      projects: [], // Ініціалізуємо projects
       tests: [],
       lessons: [],
       settings: {},
